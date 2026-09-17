@@ -173,8 +173,14 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
       }
 
       if (player.getConnection().getActiveSessionHandler() instanceof ClientPlaySessionHandler clientPlaySessionHandler) {
-        smc.setAutoReading(false);
-        clientPlaySessionHandler.doSwitch().thenRunAsync(() -> smc.setAutoReading(true), smc.eventLoop());
+        // With "remove-reconfig" the client is left in play for the whole switch: this is the one
+        // place that would otherwise push it back into configuration, and the "Reconfiguring..."
+        // screen it shows. The backend still runs its own configuration phase; ConfigSessionHandler
+        // answers it on the client's behalf.
+        if (!server.getConfiguration().isRemoveReconfig()) {
+          smc.setAutoReading(false);
+          clientPlaySessionHandler.doSwitch().thenRunAsync(() -> smc.setAutoReading(true), smc.eventLoop());
+        }
       } else {
         // Initial login - the player is already in configuration state.
         server.getEventManager().fireAndForget(new PlayerEnteredConfigurationEvent(player, serverConn));

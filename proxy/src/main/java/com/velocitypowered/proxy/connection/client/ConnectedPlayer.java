@@ -62,6 +62,7 @@ import com.velocitypowered.api.proxy.crypto.IdentifiedKey;
 import com.velocitypowered.api.proxy.crypto.KeyIdentifiable;
 import com.velocitypowered.api.proxy.messages.ChannelIdentifier;
 import com.velocitypowered.api.proxy.messages.PluginMessageEncoder;
+import com.velocitypowered.api.proxy.player.ClientWorldSwitches;
 import com.velocitypowered.api.proxy.player.PlayerSettings;
 import com.velocitypowered.api.proxy.player.ResourcePackInfo;
 import com.velocitypowered.api.proxy.server.PlayerInfoForwarding;
@@ -1492,6 +1493,8 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
   }
 
   void teardown() {
+    ClientWorldSwitches.forget(getUniqueId());
+
     if (connectionInFlight != null) {
       connectionInFlight.disconnect();
     }

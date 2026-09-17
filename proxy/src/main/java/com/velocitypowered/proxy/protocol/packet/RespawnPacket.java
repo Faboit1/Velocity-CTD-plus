@@ -100,6 +100,10 @@ public class RespawnPacket implements MinecraftPacket {
     this.dimension = dimension;
   }
 
+  public DimensionInfo getDimensionInfo() {
+    return dimensionInfo;
+  }
+
   public long getPartialHashedSeed() {
     return partialHashedSeed;
   }

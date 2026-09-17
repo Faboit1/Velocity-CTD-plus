@@ -120,6 +120,41 @@ kick-existing-players-check-ip = false
 # If not enabled (default is true) player IP addresses will be replaced by <ip address withheld> in logs.
 enable-player-address-logging = true
 
+# If true, players stay in the play state when they switch backend servers instead of being sent
+# back through the configuration state. This removes the "Reconfiguring..." screen and the resource
+# pack, tab list and boss bar flicker that comes with it, so switches look seamless.
+#
+# The proxy answers the backend's known-packs handshake on the client's behalf, replays the client
+# brand, and swallows the registry and tag data the client must not receive while it is in play.
+#
+# WARNING: every backend must run the same Minecraft version. The client keeps the registry data it
+# received from the first server it joined, so a backend on a different protocol version will
+# desync it and cause visual corruption or kicks.
+#
+# KNOWN GAP: scoreboard objectives, teams and the player list header/footer set by the previous
+# server are normally wiped by the configuration state. With this on they are not, so a sidebar or
+# header from the old server can linger until the new one replaces it. Have your backends set or
+# clear those on join.
+remove-reconfig = false
+
+# If true, the client keeps the world it already has when it switches backend servers instead of
+# rebuilding it. This is what removes the terrain loading screen, which still appears on a switch
+# even with "remove-reconfig" on, because the proxy stops relaying the destination's join game and
+# respawn packets.
+#
+# This only works when the destination reuses the entity id the client already has and joins the
+# player into the same dimension. A backend arranges the first for itself: the proxy publishes the
+# id through the ClientWorldSwitches API, a coordinating plugin passes it to the destination, and
+# the destination applies it (on Paper, Folia and Canvas, by setting the player entity's id before
+# it is added to the world) -- AdvancedServerZones is one implementation.
+#
+# The proxy checks both conditions on every switch and quietly falls back to a normal switch when
+# either does not hold, so turning this on can never break a session, only fail to help.
+#
+# Needs "remove-reconfig" to be useful: on its own, the configuration state still rebuilds the
+# client's world.
+keep-client-world-on-switch = false
+
 # If false, disables logging for offline player connections.
 log-offline-connections = true
 
