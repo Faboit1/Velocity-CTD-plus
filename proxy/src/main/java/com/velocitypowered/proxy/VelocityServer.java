@@ -88,6 +88,7 @@ import com.velocitypowered.proxy.plugin.VelocityPluginManager;
 import com.velocitypowered.proxy.plugin.loader.VelocityPluginContainer;
 import com.velocitypowered.proxy.plugin.loader.VelocityPluginDescription;
 import com.velocitypowered.proxy.plugin.virtual.VelocityVirtualPlugin;
+import com.velocitypowered.proxy.protection.antivpn.AntiVpn;
 import com.velocitypowered.proxy.protocol.ProtocolUtils;
 import com.velocitypowered.proxy.protocol.util.FaviconSerializer;
 import com.velocitypowered.proxy.protocol.util.GameProfileSerializer;
@@ -188,6 +189,7 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
       .create();
 
   private final ConnectionManager cm;
+  private @MonotonicNonNull AntiVpn antiVpn;
 
   private final ProxyOptions options;
 
@@ -458,6 +460,9 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
     LOGGER.info("Loading localizations...");
     translationRegistryManager.registerTranslations();
 
+    antiVpn = new AntiVpn(cm, configuration.getAntiVpn(), Path.of("cache", "anti-vpn"));
+    antiVpn.start();
+
     ipAttemptLimiter = Ratelimiters.createWithMilliseconds(configuration.getLoginRatelimit());
     commandRateLimiter = Ratelimiters.createWithMilliseconds(configuration.getCommandRatelimit());
     tabCompleteRateLimiter = Ratelimiters.createWithMilliseconds(configuration.getTabCompleteRatelimit());
@@ -631,6 +636,9 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
     }
 
     commandManager.setAnnounceProxyCommands(newConfiguration.isAnnounceProxyCommands());
+    if (antiVpn != null) {
+      antiVpn.reload(newConfiguration.getAntiVpn());
+    }
     ipAttemptLimiter = Ratelimiters.createWithMilliseconds(newConfiguration.getLoginRatelimit());
     this.configuration = newConfiguration;
     eventManager.fireAndForget(new ProxyReloadEvent());
@@ -969,6 +977,10 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
       // done first to refuse new connections
       cm.shutdown();
 
+      if (antiVpn != null) {
+        antiVpn.shutdown();
+      }
+
       try {
         eventManager.fire(new ProxyPreShutdownEvent())
             .toCompletableFuture()
@@ -1143,6 +1155,15 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
   @Override
   public void closeListeners() {
     this.cm.closeEndpoints(false);
+  }
+
+  /**
+   * Returns the anti-VPN service, or {@code null} before the proxy has finished booting.
+   *
+   * @return the anti-VPN service
+   */
+  public @Nullable AntiVpn getAntiVpn() {
+    return antiVpn;
   }
 
   public ConnectionManager getConnectionManager() {

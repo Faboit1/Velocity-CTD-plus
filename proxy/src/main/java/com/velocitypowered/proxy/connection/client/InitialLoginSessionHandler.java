@@ -38,6 +38,7 @@ import com.velocitypowered.proxy.connection.MinecraftSessionHandler;
 import com.velocitypowered.proxy.connection.player.resourcepack.ResourcePackTransfer;
 import com.velocitypowered.proxy.connection.util.FallbackServers;
 import com.velocitypowered.proxy.crypto.IdentifiedKeyImpl;
+import com.velocitypowered.proxy.protection.antivpn.AntiVpn;
 import com.velocitypowered.proxy.protocol.StateRegistry;
 import com.velocitypowered.proxy.protocol.netty.MinecraftDecoder;
 import com.velocitypowered.proxy.protocol.packet.ClientboundCookieRequestPacket;
@@ -159,53 +160,29 @@ public class InitialLoginSessionHandler implements MinecraftSessionHandler {
     inbound.setPlayerKey(playerKey);
     this.login = packet;
 
-    PreLoginEvent event = new PreLoginEvent(inbound, login.getUsername(), login.getHolderUuid());
-    server.getEventManager().fire(event).thenRunAsync(() -> {
-      if (mcConnection.isClosed()) {
-        // The player was disconnected
-        return;
-      }
+    // Run the anti-VPN checks before the pre-login event so plugins are not asked to do work for a
+    // connection we are about to refuse. The local list check answers immediately; only an online
+    // reputation lookup actually defers this.
+    final AntiVpn antiVpn = server.getAntiVpn();
+    if (antiVpn == null || !antiVpn.isEnabled()) {
+      beginPreLogin();
+      return true;
+    }
 
-      PreLoginComponentResult result = event.getResult();
-      Optional<Component> disconnectReason = result.getReasonComponent();
-      if (disconnectReason.isPresent()) {
-        // The component is guaranteed to be provided if the connection was denied.
-        inbound.disconnect(disconnectReason.get());
-        return;
-      }
-
-      inbound.loginEventFired(() -> {
-        if (mcConnection.isClosed()) {
-          // The player was disconnected
-          return;
-        }
-
-        mcConnection.eventLoop().execute(() -> {
-          boolean onlineAuth = !result.isForceOfflineMode()
-              && (server.getConfiguration().isOnlineMode() || result.isOnlineModeAllowed());
-          boolean offlineEncryption = !onlineAuth
-              && server.getConfiguration().isOfflineModeEncryptionEnabled()
-              && mcConnection.getProtocolVersion().noLessThan(ProtocolVersion.MINECRAFT_1_20_5);
-
-          if (onlineAuth || offlineEncryption) {
-            // Request encryption.
-            EncryptionRequestPacket request = generateEncryptionRequest(onlineAuth);
-            this.authenticateWithMojang = onlineAuth;
-            this.verify = Arrays.copyOf(request.getVerifyToken(), 4);
-            mcConnection.write(request);
-            this.currentState = LoginState.ENCRYPTION_REQUEST_SENT;
-          } else {
-            mcConnection.setActiveSessionHandler(StateRegistry.LOGIN,
-                new AuthSessionHandler(server, inbound,
-                    GameProfile.forOfflinePlayer(login.getUsername()), false, null, appliedResourcePacksFuture));
+    antiVpn.shouldBlock(inbound.getRemoteAddress(), packet.getUsername())
+        .whenCompleteAsync((blocked, throwable) -> {
+          if (mcConnection.isClosed()) {
+            return;
           }
-        });
-      });
-    }, mcConnection.eventLoop()).exceptionally((ex) -> {
-      LOGGER.error("Exception in pre-login stage", ex);
-      return null;
-    });
-
+          if (throwable != null) {
+            // Fail open: an anti-VPN failure must not stop players from joining.
+            LOGGER.error("Anti-VPN check failed, allowing the connection", throwable);
+          } else if (blocked) {
+            inbound.disconnect(Component.translatable("velocity.kick.vpn-detected"));
+            return;
+          }
+          beginPreLogin();
+        }, mcConnection.eventLoop());
     return true;
   }
 
@@ -322,6 +299,60 @@ public class InitialLoginSessionHandler implements MinecraftSessionHandler {
     }
 
     return false;
+  }
+
+  private void beginPreLogin() {
+    ServerLoginPacket login = this.login;
+    if (login == null) {
+      throw new IllegalStateException("No ServerLogin packet received yet.");
+    }
+
+    PreLoginEvent event = new PreLoginEvent(inbound, login.getUsername(), login.getHolderUuid());
+    server.getEventManager().fire(event).thenRunAsync(() -> {
+      if (mcConnection.isClosed()) {
+        // The player was disconnected
+        return;
+      }
+
+      PreLoginComponentResult result = event.getResult();
+      Optional<Component> disconnectReason = result.getReasonComponent();
+      if (disconnectReason.isPresent()) {
+        // The component is guaranteed to be provided if the connection was denied.
+        inbound.disconnect(disconnectReason.get());
+        return;
+      }
+
+      inbound.loginEventFired(() -> {
+        if (mcConnection.isClosed()) {
+          // The player was disconnected
+          return;
+        }
+
+        mcConnection.eventLoop().execute(() -> {
+          boolean onlineAuth = !result.isForceOfflineMode()
+              && (server.getConfiguration().isOnlineMode() || result.isOnlineModeAllowed());
+          boolean offlineEncryption = !onlineAuth
+              && server.getConfiguration().isOfflineModeEncryptionEnabled()
+              && mcConnection.getProtocolVersion().noLessThan(ProtocolVersion.MINECRAFT_1_20_5);
+
+          if (onlineAuth || offlineEncryption) {
+            // Request encryption.
+            EncryptionRequestPacket request = generateEncryptionRequest(onlineAuth);
+            this.authenticateWithMojang = onlineAuth;
+            this.verify = Arrays.copyOf(request.getVerifyToken(), 4);
+            mcConnection.write(request);
+            this.currentState = LoginState.ENCRYPTION_REQUEST_SENT;
+          } else {
+            mcConnection.setActiveSessionHandler(StateRegistry.LOGIN,
+                new AuthSessionHandler(server, inbound,
+                    GameProfile.forOfflinePlayer(login.getUsername()), false, null, appliedResourcePacksFuture));
+          }
+        });
+      });
+    }, mcConnection.eventLoop()).exceptionally((ex) -> {
+      LOGGER.error("Exception in pre-login stage", ex);
+      return null;
+    });
   }
 
   private EncryptionRequestPacket generateEncryptionRequest(boolean shouldAuthenticate) {

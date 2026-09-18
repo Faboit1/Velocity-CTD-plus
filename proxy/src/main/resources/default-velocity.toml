@@ -120,6 +120,41 @@ kick-existing-players-check-ip = false
 # If not enabled (default is true) player IP addresses will be replaced by <ip address withheld> in logs.
 enable-player-address-logging = true
 
+# If true, players stay in the play state when they switch backend servers instead of being sent
+# back through the configuration state. This removes the "Reconfiguring..." screen and the resource
+# pack, tab list and boss bar flicker that comes with it, so switches look seamless.
+#
+# The proxy answers the backend's known-packs handshake on the client's behalf, replays the client
+# brand, and swallows the registry and tag data the client must not receive while it is in play.
+#
+# WARNING: every backend must run the same Minecraft version. The client keeps the registry data it
+# received from the first server it joined, so a backend on a different protocol version will
+# desync it and cause visual corruption or kicks.
+#
+# KNOWN GAP: scoreboard objectives, teams and the player list header/footer set by the previous
+# server are normally wiped by the configuration state. With this on they are not, so a sidebar or
+# header from the old server can linger until the new one replaces it. Have your backends set or
+# clear those on join.
+remove-reconfig = false
+
+# If true, the client keeps the world it already has when it switches backend servers instead of
+# rebuilding it. This is what removes the terrain loading screen, which still appears on a switch
+# even with "remove-reconfig" on, because the proxy stops relaying the destination's join game and
+# respawn packets.
+#
+# This only works when the destination reuses the entity id the client already has and joins the
+# player into the same dimension. A backend arranges the first for itself: the proxy publishes the
+# id through the ClientWorldSwitches API, a coordinating plugin passes it to the destination, and
+# the destination applies it (on Paper, Folia and Canvas, by setting the player entity's id before
+# it is added to the world) -- AdvancedServerZones is one implementation.
+#
+# The proxy checks both conditions on every switch and quietly falls back to a normal switch when
+# either does not hold, so turning this on can never break a session, only fail to help.
+#
+# Needs "remove-reconfig" to be useful: on its own, the configuration state still rebuilds the
+# client's world.
+keep-client-world-on-switch = false
+
 # If false, disables logging for offline player connections.
 log-offline-connections = true
 
@@ -187,6 +222,57 @@ bytes-per-second = -1
 # Protects against compression bomb attacks where small packets expand to excessive sizes after decompression.
 # -1 disables this check.
 decompressed-bytes-per-second = 5242880
+
+[anti-vpn]
+# Refuses connections coming from VPNs, public proxies, Tor exit nodes and datacentre ranges.
+# Both checks below fail open: if a list host or API is unreachable, players are let in rather
+# than locked out.
+enabled = false
+# Log every refused connection with the address and the reason.
+log-blocked = true
+# How often the address lists below are re-downloaded, in minutes. 0 loads them only at startup.
+refresh-minutes = 360
+# Address lists to block. Any plain address or CIDR range found in these files is matched;
+# the format of the file itself does not matter. Entries broader than /8 (IPv4) or /16 (IPv6)
+# are ignored so one bad line cannot lock out the whole internet.
+# Each list is mirrored to cache/anti-vpn/ and reused if the host is unreachable later.
+lists = [
+    "https://raw.githubusercontent.com/X4BNet/lists_vpn/main/output/vpn/ipv4.txt",
+    "https://raw.githubusercontent.com/X4BNet/lists_vpn/main/output/datacenter/ipv4.txt",
+    "https://check.torproject.org/torbulkexitlist",
+    "https://raw.githubusercontent.com/scriptzteam/ProtonVPN-VPN-IPs/main/exit_ips.txt",
+    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks4.txt",
+    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
+    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
+    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks4.txt",
+    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt"
+]
+# Address lists that override the lists above, in the same formats.
+whitelist-lists = []
+# Addresses and CIDR ranges that are never blocked. Loopback and private addresses are always
+# exempt and do not need to be listed here.
+whitelisted-ips = []
+# Usernames that are never blocked, matched case-insensitively.
+whitelisted-users = []
+
+# Consults online reputation APIs for addresses that no list above covers. This is slower and
+# adds latency to logins, but catches addresses the public lists miss. Verdicts are cached.
+online-enabled = false
+# API URL templates. {ip} is replaced with the connecting address. The defaults are free tiers
+# with low rate limits -- use a keyed endpoint if you run a busy proxy.
+online-apis = [
+    "https://proxycheck.io/v2/{ip}?vpn=1&asn=1",
+    "https://api.ipapi.is/?q={ip}"
+]
+# How long to wait for one API response, in milliseconds. A timeout lets the player in.
+online-timeout-ms = 1500
+# How long an API verdict is reused, in minutes, and how many verdicts are kept.
+online-cache-minutes = 720
+online-cache-size = 50000
+# Maximum number of API lookups in flight at once. Under a connection flood, lookups past this
+# limit are skipped rather than queued, leaving the local list checks to do the work.
+online-max-concurrent = 100
 
 [servers]
 # Configure your servers here. Each key represents the server's name, and the value

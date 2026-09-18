@@ -165,6 +165,8 @@ public final class VelocityConfiguration implements ProxyConfig {
 
   @Expose
   private final boolean enablePlayerAddressLogging;
+  private final boolean removeReconfig;
+  private final boolean keepClientWorldOnSwitch;
 
   @Expose
   private final boolean forceKeyAuthentication;
@@ -253,6 +255,7 @@ public final class VelocityConfiguration implements ProxyConfig {
    */
   @Expose
   private final Map<String, Integer> playerCaps;
+  private final AntiVpnConfig antiVpn;
 
   private VelocityConfiguration(String bind, List<String> motd, List<String> motdHover,
                                 int showMaxPlayers, boolean onlineMode,
@@ -262,6 +265,7 @@ public final class VelocityConfiguration implements ProxyConfig {
                                 boolean kickExistingPlayers, boolean kickExistingPlayersCheckIp,
                                 PingPassthroughMode pingPassthrough,
                                 boolean enablePlayerAddressLogging,
+                                boolean removeReconfig, boolean keepClientWorldOnSwitch,
                                 Servers servers, ForcedHosts forcedHosts,
                                 Map<String, List<String>> commandAliases,
                                 Map<String, List<String>> proxyCommandAliases,
@@ -275,7 +279,8 @@ public final class VelocityConfiguration implements ProxyConfig {
                                 String maximumVersion,
                                 Redis redis, Queue queue, Map<String, List<String>> slashServers,
                                 Map<String, List<ServerLink>> serverLinks, List<ProxyAddress> proxyAddresses,
-                                DynamicProxyFilterMode dynamicProxyFilter, Map<String, Integer> playerCaps) {
+                                DynamicProxyFilterMode dynamicProxyFilter, Map<String, Integer> playerCaps,
+                                AntiVpnConfig antiVpn) {
     this.bind = bind;
     this.motd = motd;
     this.motdHover = motdHover;
@@ -290,6 +295,8 @@ public final class VelocityConfiguration implements ProxyConfig {
     this.kickExistingPlayersCheckIp = kickExistingPlayersCheckIp;
     this.pingPassthrough = pingPassthrough;
     this.enablePlayerAddressLogging = enablePlayerAddressLogging;
+    this.removeReconfig = removeReconfig;
+    this.keepClientWorldOnSwitch = keepClientWorldOnSwitch;
     this.servers = servers;
     this.forcedHosts = forcedHosts;
     this.commandAliases = commandAliases;
@@ -317,6 +324,7 @@ public final class VelocityConfiguration implements ProxyConfig {
     this.proxyAddresses = proxyAddresses;
     this.dynamicProxyFilter = dynamicProxyFilter;
     this.playerCaps = playerCaps;
+    this.antiVpn = antiVpn;
   }
 
   /**
@@ -828,6 +836,26 @@ public final class VelocityConfiguration implements ProxyConfig {
     return enablePlayerAddressLogging;
   }
 
+  /**
+   * Returns whether players stay in the play state across a backend switch instead of being sent
+   * back through the configuration state.
+   *
+   * @return {@code true} if the configuration state is skipped on switches
+   */
+  public boolean isRemoveReconfig() {
+    return removeReconfig;
+  }
+
+  /**
+   * Returns whether the client keeps the world it already has across a backend switch, when the
+   * destination cooperates by reusing the client's entity ID and dimension.
+   *
+   * @return {@code true} if the client's world may be preserved across switches
+   */
+  public boolean isKeepClientWorldOnSwitch() {
+    return keepClientWorldOnSwitch;
+  }
+
   public boolean isBungeePluginChannelEnabled() {
     return advanced.isBungeePluginMessageChannel();
   }
@@ -1017,6 +1045,15 @@ public final class VelocityConfiguration implements ProxyConfig {
   }
 
   /**
+   * Gets the anti-VPN configuration.
+   *
+   * @return the anti-VPN settings
+   */
+  public AntiVpnConfig getAntiVpn() {
+    return antiVpn;
+  }
+
+  /**
    * Gets all server links scoped to the provided server name, including global ones.
    *
    * @param serverName the backend server name (e.g., "lobby")
@@ -1061,6 +1098,8 @@ public final class VelocityConfiguration implements ProxyConfig {
         .add("redis", redis)
         .add("queue", queue)
         .add("enablePlayerAddressLogging", enablePlayerAddressLogging)
+        .add("removeReconfig", removeReconfig)
+        .add("keepClientWorldOnSwitch", keepClientWorldOnSwitch)
         .add("forceKeyAuthentication", forceKeyAuthentication)
         .add("packetLimiterConfig", packetLimiterConfig)
         .add("logPlayerConnections", logPlayerConnections)
@@ -1078,6 +1117,7 @@ public final class VelocityConfiguration implements ProxyConfig {
         .add("proxyAddresses", proxyAddresses)
         .add("dynamicProxyFilter", dynamicProxyFilter)
         .add("playerCaps", playerCaps)
+        .add("antiVpn", antiVpn)
         .toString();
   }
 
@@ -1205,7 +1245,10 @@ public final class VelocityConfiguration implements ProxyConfig {
       boolean kickExisting = config.getOrElse("kick-existing-players", false);
       boolean kickExistingCheckIp = config.getOrElse("kick-existing-players-check-ip", false);
       boolean enablePlayerAddressLogging = config.getOrElse("enable-player-address-logging", true);
+      boolean removeReconfig = config.getOrElse("remove-reconfig", false);
+      boolean keepClientWorldOnSwitch = config.getOrElse("keep-client-world-on-switch", false);
       PacketLimiterConfig packetLimiterConfig = PacketLimiterConfig.fromConfig(config.get("packet-limiter"));
+      AntiVpnConfig antiVpnConfig = AntiVpnConfig.fromConfig(config.get("anti-vpn"));
       boolean logPlayerConnections = config.getOrElse("log-player-connections", true);
       boolean logPlayerDisconnections = config.getOrElse("log-player-disconnections", true);
       boolean logOfflineConnections = config.getOrElse("log-offline-connections", true);
@@ -1307,6 +1350,8 @@ public final class VelocityConfiguration implements ProxyConfig {
           kickExistingCheckIp,
           pingPassthrough,
           enablePlayerAddressLogging,
+          removeReconfig,
+          keepClientWorldOnSwitch,
           new Servers(serversConfig),
           new ForcedHosts(forcedHostsConfig),
           parseAliasMap(commandAliasesConfig, "command-aliases"),
@@ -1333,7 +1378,8 @@ public final class VelocityConfiguration implements ProxyConfig {
           links,
           addresses,
           filter,
-          playerCaps
+          playerCaps,
+          antiVpnConfig
       );
     }
   }
@@ -2586,6 +2632,112 @@ public final class VelocityConfiguration implements ProxyConfig {
       } else {
         return DEFAULT;
       }
+    }
+  }
+
+  /**
+   * Configuration for the built-in anti-VPN checks.
+   *
+   * @param enabled              whether any anti-VPN checking happens at all
+   * @param logBlocked           whether refused connections are logged
+   * @param refreshMinutes       how often the address feeds are re-downloaded, {@code 0} to load
+   *                             them only at startup
+   * @param feeds                URLs of address feeds listing VPN, proxy and datacentre addresses
+   * @param whitelistFeeds       URLs of address feeds that override {@code feeds}
+   * @param whitelistedIps       addresses and CIDR ranges that are never blocked
+   * @param whitelistedUsers     usernames that are never blocked, matched case-insensitively
+   * @param onlineEnabled        whether reputation APIs are consulted for addresses no feed lists
+   * @param onlineApis           API URL templates, where {@code {ip}} is replaced by the address
+   * @param onlineTimeoutMillis  how long to wait for a single API response
+   * @param onlineCacheMinutes   how long an API verdict is reused
+   * @param onlineCacheSize      the maximum number of cached API verdicts
+   * @param onlineMaxConcurrent  the maximum number of API lookups in flight at once
+   */
+  public record AntiVpnConfig(
+      boolean enabled,
+      boolean logBlocked,
+      int refreshMinutes,
+      List<String> feeds,
+      List<String> whitelistFeeds,
+      List<String> whitelistedIps,
+      List<String> whitelistedUsers,
+      boolean onlineEnabled,
+      List<String> onlineApis,
+      int onlineTimeoutMillis,
+      int onlineCacheMinutes,
+      int onlineCacheSize,
+      int onlineMaxConcurrent) {
+
+    /**
+     * Address feeds used when the configuration does not list any. These are public, free and
+     * require no API key.
+     */
+    private static final List<String> DEFAULT_FEEDS = ImmutableList.of(
+        "https://raw.githubusercontent.com/X4BNet/lists_vpn/main/output/vpn/ipv4.txt",
+        "https://raw.githubusercontent.com/X4BNet/lists_vpn/main/output/datacenter/ipv4.txt",
+        "https://check.torproject.org/torbulkexitlist",
+        "https://raw.githubusercontent.com/scriptzteam/ProtonVPN-VPN-IPs/main/exit_ips.txt",
+        "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+        "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks4.txt",
+        "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
+        "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
+        "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks4.txt",
+        "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt"
+    );
+
+    /**
+     * Reputation APIs used when {@code online-enabled} is on but no APIs are configured. All have
+     * a free tier that needs no key; heavy traffic wants a keyed endpoint here instead.
+     */
+    private static final List<String> DEFAULT_ONLINE_APIS = ImmutableList.of(
+        "https://proxycheck.io/v2/{ip}?vpn=1&asn=1",
+        "https://api.ipapi.is/?q={ip}"
+    );
+
+    public static final AntiVpnConfig DEFAULT = new AntiVpnConfig(
+        false, true, 360, DEFAULT_FEEDS, ImmutableList.of(), ImmutableList.of(),
+        ImmutableList.of(), false, DEFAULT_ONLINE_APIS, 1500, 720, 50_000, 100);
+
+    /**
+     * Reads the anti-VPN settings from a config section.
+     *
+     * @param config the {@code [anti-vpn]} section, or {@code null} if absent
+     * @return the parsed settings, or {@link #DEFAULT} if the section is absent
+     */
+    public static AntiVpnConfig fromConfig(final CommentedConfig config) {
+      if (config == null) {
+        return DEFAULT;
+      }
+      return new AntiVpnConfig(
+          config.getOrElse("enabled", DEFAULT.enabled()),
+          config.getOrElse("log-blocked", DEFAULT.logBlocked()),
+          config.getIntOrElse("refresh-minutes", DEFAULT.refreshMinutes()),
+          stringList(config, "lists", DEFAULT.feeds()),
+          stringList(config, "whitelist-lists", DEFAULT.whitelistFeeds()),
+          stringList(config, "whitelisted-ips", DEFAULT.whitelistedIps()),
+          stringList(config, "whitelisted-users", DEFAULT.whitelistedUsers()),
+          config.getOrElse("online-enabled", DEFAULT.onlineEnabled()),
+          stringList(config, "online-apis", DEFAULT.onlineApis()),
+          config.getIntOrElse("online-timeout-ms", DEFAULT.onlineTimeoutMillis()),
+          config.getIntOrElse("online-cache-minutes", DEFAULT.onlineCacheMinutes()),
+          config.getIntOrElse("online-cache-size", DEFAULT.onlineCacheSize()),
+          config.getIntOrElse("online-max-concurrent", DEFAULT.onlineMaxConcurrent())
+      );
+    }
+
+    private static List<String> stringList(final CommentedConfig config, final String key,
+        final List<String> fallback) {
+      final Object value = config.get(key);
+      if (!(value instanceof List<?> list)) {
+        return fallback;
+      }
+      final ImmutableList.Builder<String> builder = ImmutableList.builder();
+      for (final Object element : list) {
+        if (element instanceof String string && !string.isBlank()) {
+          builder.add(string);
+        }
+      }
+      return builder.build();
     }
   }
 
