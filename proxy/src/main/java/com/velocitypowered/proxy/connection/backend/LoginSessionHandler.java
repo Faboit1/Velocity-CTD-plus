@@ -22,6 +22,7 @@ import com.velocitypowered.api.event.player.ServerLoginPluginMessageEvent;
 import com.velocitypowered.api.event.player.configuration.PlayerEnteredConfigurationEvent;
 import com.velocitypowered.api.network.ProtocolVersion;
 import com.velocitypowered.api.proxy.messages.MinecraftChannelIdentifier;
+import com.velocitypowered.api.proxy.player.ClientWorldSwitches;
 import com.velocitypowered.api.proxy.server.PlayerInfoForwarding;
 import com.velocitypowered.proxy.VelocityServer;
 import com.velocitypowered.proxy.config.VelocityConfiguration;
@@ -32,6 +33,7 @@ import com.velocitypowered.proxy.connection.client.ClientPlaySessionHandler;
 import com.velocitypowered.proxy.connection.client.ConnectedPlayer;
 import com.velocitypowered.proxy.connection.util.ConnectionRequestResults;
 import com.velocitypowered.proxy.connection.util.ConnectionRequestResults.Impl;
+import com.velocitypowered.proxy.protocol.ProtocolUtils;
 import com.velocitypowered.proxy.protocol.StateRegistry;
 import com.velocitypowered.proxy.protocol.packet.ClientboundCookieRequestPacket;
 import com.velocitypowered.proxy.protocol.packet.ClientboundStoreCookiePacket;
@@ -59,6 +61,17 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
   static {
     LogManager.getLogger(LoginSessionHandler.class);
   }
+
+  /**
+   * Login-phase channel the backend companion plugin uses to ask for the client's entity ID, so a
+   * world-preserving switch can reuse it. See {@code keep-client-world-on-switch}.
+   */
+  private static final String SEAMLESS_CHANNEL = "velocityctd:seamless";
+
+  /**
+   * Payload format version, so the plugin can refuse a proxy it does not understand.
+   */
+  private static final byte SEAMLESS_FORMAT_VERSION = 1;
 
   private static final Component MODERN_IP_FORWARDING_FAILURE = Component.translatable("velocity.error.modern-forwarding-failed");
 
@@ -110,6 +123,8 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
       LoginPluginResponsePacket response = new LoginPluginResponsePacket(packet.getId(), true, forwardingData);
       mc.write(response);
       informationForwarded = true;
+    } else if (packet.getChannel().equals(SEAMLESS_CHANNEL)) {
+      mc.write(new LoginPluginResponsePacket(packet.getId(), true, seamlessHandshake()));
     } else {
       // Don't understand, fire event if we have subscribers
       if (!this.server.getEventManager().hasSubscribers(ServerLoginPluginMessageEvent.class)) {
@@ -231,5 +246,31 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
           new QuietRuntimeException("The connection to the remote server was unexpectedly closed.")
       );
     }
+  }
+
+  /**
+   * Tells the backend companion plugin which entity ID this player's client already holds, so
+   * the backend can reuse it instead of issuing a fresh one.
+   *
+   * <p>The backend cannot work this out for itself -- the ID was assigned by whichever server the
+   * player joined first -- and it has to know before it builds the join game packet, which is why
+   * this rides the login phase rather than an ordinary plugin message.</p>
+   *
+   * <p>A zero entity ID means "join the player normally": either the feature is off, or this is a
+   * first join with no prior ID to preserve. The backend treats that as no instruction, and the
+   * proxy's own check then falls back to a normal switch.</p>
+   *
+   * @return the response payload: a format byte followed by the entity ID
+   */
+  private ByteBuf seamlessHandshake() {
+    final ConnectedPlayer player = serverConn.getPlayer();
+    final int entityId = server.getConfiguration().isKeepClientWorldOnSwitch()
+        ? ClientWorldSwitches.clientEntityId(player.getUniqueId())
+        : 0;
+
+    final ByteBuf response = Unpooled.buffer(5);
+    response.writeByte(SEAMLESS_FORMAT_VERSION);
+    ProtocolUtils.writeVarInt(response, entityId);
+    return response;
   }
 }

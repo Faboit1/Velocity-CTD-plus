@@ -8,6 +8,9 @@ dependencyResolutionManagement {
         maven("https://repo.velocityctd.com/releases") {
             name = "velocityctdReleases"
         }
+        maven("https://repo.codemc.io/repository/maven-releases/") {
+            name = "codemc"
+        }
     }
 }
 
@@ -44,6 +47,11 @@ project(permissionIntegrationSpi).projectDir = file("permission-integration/spi"
 val permissionIntegrationLuckperms = ":velocity-permission-integration-luckperms"
 include(permissionIntegrationLuckperms)
 project(permissionIntegrationLuckperms).projectDir = file("permission-integration/luckperms")
+
+// Companion Paper/Folia plugin for seamless server switching
+val seamlessPaperPlugin = ":velocity-seamless-paper"
+include(seamlessPaperPlugin)
+project(seamlessPaperPlugin).projectDir = file("paper-plugin")
 
 // Include Configurate 3
 val deprecatedConfigurateModule = ":deprecated-configurate3"
