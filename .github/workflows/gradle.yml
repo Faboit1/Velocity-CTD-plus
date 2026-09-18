@@ -84,6 +84,13 @@ jobs:
         VERSION=$(echo "$JAR" | sed 's|bootstrap/build/libs/velocity-bootstrap-||' | sed 's|\.jar||')
         cp "$JAR" "bootstrap/build/libs/velocity-ctd-$VERSION-${{ steps.release_tag.outputs.build_nr }}.jar"
 
+    - name: Rename Seamless Paper Plugin
+      if: github.ref == env.RELEASE_BRANCH
+      run: |
+        JAR=$(ls paper-plugin/build/libs/VelocitySeamless-*.jar | grep -v -- '-sources\.jar')
+        VERSION=$(echo "$JAR" | sed 's|paper-plugin/build/libs/VelocitySeamless-||' | sed 's|\.jar||')
+        cp "$JAR" "paper-plugin/build/libs/VelocitySeamless-$VERSION-${{ steps.release_tag.outputs.build_nr }}-release.jar"
+
     - name: Publish to Maven Repository
       if: github.ref == env.RELEASE_BRANCH
       continue-on-error: true
@@ -108,6 +115,9 @@ jobs:
           **Recommended — `velocity-ctd-<version>-<build>.jar` (bootstrap jar)**
           This is the bootstrap jar. It downloads the required dependencies only once, keeping the download small. Use this one.
 
+          **Backend plugin — `VelocitySeamless-<version>-<build>-release.jar`**
+          Optional. Install on your Paper/Folia/Canvas backends, alongside [packetevents](https://modrinth.com/plugin/packetevents), to drop the terrain loading screen on server switches and long teleports. See `paper-plugin/README.md`.
+
           **Fallback — `velocity-ctd-fatjar-<version>-<build>.jar`**
           Only download the fatjar if the bootstrap jar is causing issues for you. If it is, please [open an issue](https://github.com/${{ github.repository }}/issues) describing the problem so we can fix it.
 
@@ -116,4 +126,5 @@ jobs:
           ---
         files: |
           proxy/build/libs/velocity-ctd-fatjar-*-${{ steps.release_tag.outputs.build_nr }}.jar
+          paper-plugin/build/libs/VelocitySeamless-*-${{ steps.release_tag.outputs.build_nr }}-release.jar
           bootstrap/build/libs/velocity-ctd-*-${{ steps.release_tag.outputs.build_nr }}.jar

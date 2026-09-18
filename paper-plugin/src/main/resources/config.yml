@@ -1,0 +1,24 @@
+# VelocitySeamless -- backend companion to Velocity-CTD+'s seamless switching.
+#
+# Needs the packetevents plugin installed alongside it.
+
+# Give an arriving player the entity ID their client already holds, so the proxy can withhold the
+# join game and respawn packets and the client keeps the world it already has.
+#
+# Requires "keep-client-world-on-switch" to be on in the proxy's velocity.toml. The proxy is asked
+# for the ID during login, on the channel velocityctd:seamless. If the proxy does not answer, or is
+# not a Velocity-CTD+, nothing happens and players join normally.
+#
+# Needs Paper 1.20.5 or newer (including Folia and Canvas): the entity ID is set through the
+# server's own internals, which only became reachable by name once Paper moved to Mojang mappings.
+reuse-entity-id-on-switch: true
+
+# Stop the "Loading terrain" screen appearing when a player teleports within the same world.
+#
+# On Folia this is what you see crossing into another region; on any server it is what you see on a
+# sufficiently long teleport. The server's request for the screen is dropped and the acknowledgement
+# it waits for is sent on the client's behalf, so the player is never held still.
+#
+# Dimension changes are left alone -- there the client really does have to rebuild its world, and
+# hiding the screen would just show an empty void while chunks stream in.
+hide-teleport-loading-screen: true
