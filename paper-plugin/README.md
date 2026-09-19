@@ -53,10 +53,10 @@ Both features can be switched off independently in `config.yml`.
 
 ## When a loading screen still appears
 
-Set `debug: true` in `config.yml` and restart. The plugin then logs, for every arriving player and
-every loading request, what it decided and why -- whether the proxy had an entity ID to reuse, and
+Debug logging is on by default while this feature is still being proven in the field. The plugin
+logs, for every arriving player and every loading request, what it decided and why -- whether the proxy had an entity ID to reuse, and
 whether the request was suppressed or deliberately allowed through. That turns "it still flashes"
-into a line naming the cause.
+into a line naming the cause. Set `debug: false` once your setup is confirmed working.
 
 The usual causes, in order:
 
