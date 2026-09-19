@@ -26,4 +26,4 @@ hide-teleport-loading-screen: true
 # Log what the plugin decides for every loading request and every arriving player. Turn this on when
 # a loading screen still appears and it is not obvious why: it reports whether the proxy had an
 # entity ID to reuse, and whether each request was suppressed or deliberately allowed through.
-debug: false
+debug: true
