@@ -21,11 +21,15 @@ import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketListenerPriority;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
+import com.github.retrooper.packetevents.protocol.player.User;
+import com.github.retrooper.packetevents.wrapper.login.client.WrapperLoginClientLoginStart;
 import com.github.retrooper.packetevents.wrapper.login.client.WrapperLoginClientPluginResponse;
 import com.github.retrooper.packetevents.wrapper.login.server.WrapperLoginServerPluginRequest;
+import java.util.Collections;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
+import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
@@ -36,6 +40,11 @@ import java.util.logging.Logger;
  * <p>This has to happen in the login phase because the answer is needed before the server builds
  * the join game packet, which is long before an ordinary plugin message channel exists. It mirrors
  * how Velocity's modern player-info forwarding works: the server asks, the proxy answers.</p>
+ *
+ * <p>Answers are filed under the player's name. Mid-login there is not much else to file them
+ * under: a connection has no {@code Player} yet, and its UUID is not populated until later, so
+ * keying on that silently discarded every answer. The name arrives with the login itself, in the
+ * very packet that prompts the question.</p>
  *
  * <p>A proxy that does not know this channel answers "unsuccessful", and one that is not a
  * Velocity-CTD+ answers nothing at all. Both leave no recorded ID, the plugin does nothing, and
@@ -65,17 +74,24 @@ final class ProxyEntityIdChannel extends PacketListenerAbstract {
   private final Logger debugLogger;
 
   /**
-   * Entity IDs the proxy reported, keyed by player, waiting to be applied when the player spawns.
-   * Entries are removed when used, and by the plugin when a login does not complete.
+   * The name each connection is logging in as, carried from the login start packet to the proxy's
+   * answer. Weak keys because the entry's natural lifetime is the connection's: a login that dies
+   * before the proxy answers takes its entry with it.
    */
-  private final Map<UUID, Integer> pending = new ConcurrentHashMap<>();
+  private final Map<User, String> loggingIn = Collections.synchronizedMap(new WeakHashMap<>());
+
+  /**
+   * Entity IDs the proxy reported, keyed by player name, waiting to be applied when the player
+   * spawns. Entries are removed when used, and by the plugin when a login does not complete.
+   */
+  private final Map<String, Integer> pending = new ConcurrentHashMap<>();
 
   /**
    * Players the proxy answered for, whatever the answer was. Kept apart from {@link #pending} so
    * that "the proxy said this is a first join" can be told from "no proxy answered at all", which
    * are the same absence of an ID but very different things to go and look at.
    */
-  private final Set<UUID> answered = ConcurrentHashMap.newKeySet();
+  private final Set<String> answered = ConcurrentHashMap.newKeySet();
 
   ProxyEntityIdChannel(final Logger logger, final Logger debugLogger) {
     // Run late enough that the login has a user profile, but this only reads and injects.
@@ -90,6 +106,10 @@ final class ProxyEntityIdChannel extends PacketListenerAbstract {
     }
   }
 
+  private static String key(final String playerName) {
+    return playerName.toLowerCase(Locale.ROOT);
+  }
+
   @Override
   public void onPacketReceive(final PacketReceiveEvent event) {
     if (event.getPacketType() == PacketType.Login.Client.LOGIN_START) {
@@ -102,11 +122,14 @@ final class ProxyEntityIdChannel extends PacketListenerAbstract {
   private void askProxy(final PacketReceiveEvent event) {
     // Sent as the login starts so the answer is back well before the player spawns. The payload is
     // just our format version, so a future proxy can tell what this plugin understands.
-    final WrapperLoginServerPluginRequest request = new WrapperLoginServerPluginRequest(
-        MESSAGE_ID, CHANNEL, new byte[] {SeamlessPayload.FORMAT_VERSION});
     try {
-      event.getUser().sendPacket(request);
-      debug("asked the proxy on " + CHANNEL + " as message " + MESSAGE_ID);
+      final String username = new WrapperLoginClientLoginStart(event).getUsername();
+      if (username != null) {
+        loggingIn.put(event.getUser(), username);
+      }
+      event.getUser().sendPacket(new WrapperLoginServerPluginRequest(
+          MESSAGE_ID, CHANNEL, new byte[] {SeamlessPayload.FORMAT_VERSION}));
+      debug("asked the proxy on " + CHANNEL + " for " + username + " as message " + MESSAGE_ID);
     } catch (final RuntimeException | LinkageError failed) {
       debug("could not ask the proxy on " + CHANNEL + " (" + failed + ")");
     }
@@ -126,14 +149,19 @@ final class ProxyEntityIdChannel extends PacketListenerAbstract {
     // request and would disconnect the player over an unexpected message ID.
     event.setCancelled(true);
 
-    if (!response.isSuccessful()) {
-      // Proxy does not support this, or has the feature switched off.
-      debug("the proxy declined " + CHANNEL + "; it is not a Velocity-CTD+, or the channel name "
-          + "does not match the one it answers on");
+    final String username = loggingIn.remove(event.getUser());
+    if (username == null) {
+      debug("the proxy answered " + CHANNEL + ", but the login start that asked for it named no "
+          + "player to file the answer under");
       return;
     }
 
-    final UUID uuid = event.getUser().getUUID();
+    if (!response.isSuccessful()) {
+      // Proxy does not support this, or has the feature switched off.
+      debug("the proxy declined " + CHANNEL + " for " + username + "; it is not a Velocity-CTD+, "
+          + "or the channel name does not match the one it answers on");
+      return;
+    }
 
     final byte[] data = response.getData();
     if (data != null && data.length >= 1 && data[0] != SeamlessPayload.FORMAT_VERSION) {
@@ -142,50 +170,46 @@ final class ProxyEntityIdChannel extends PacketListenerAbstract {
       return;
     }
 
-    if (uuid == null) {
-      debug("the proxy answered " + CHANNEL + ", but this connection has no UUID yet to file the "
-          + "answer under");
-      return;
-    }
-    answered.add(uuid);
+    answered.add(key(username));
 
     final int entityId = SeamlessPayload.readEntityId(data);
-    debug("the proxy answered " + CHANNEL + " for " + uuid + " with entity ID " + entityId);
+    debug("the proxy answered " + CHANNEL + " for " + username + " with entity ID " + entityId);
     if (entityId == SeamlessPayload.NO_ENTITY_ID) {
       return; // First join, or the proxy has nothing to preserve.
     }
-    pending.put(uuid, entityId);
+    pending.put(key(username), entityId);
   }
 
   /**
    * Says whether the proxy answered this plugin's login-phase question at all.
    *
-   * @param player the player's unique ID
+   * @param playerName the arriving player's name
    * @return {@code true} if an answer came back, whatever entity ID it named
    */
-  boolean proxyAnswered(final UUID player) {
-    return answered.contains(player);
+  boolean proxyAnswered(final String playerName) {
+    return answered.contains(key(playerName));
   }
 
   /**
    * Takes the entity ID the proxy reported for a player, if any.
    *
-   * @param player the player's unique ID
+   * @param playerName the arriving player's name
    * @return the entity ID to apply, or {@code 0} if the proxy reported none
    */
-  int takeEntityId(final UUID player) {
-    final Integer entityId = pending.remove(player);
+  int takeEntityId(final String playerName) {
+    final Integer entityId = pending.remove(key(playerName));
     return entityId == null ? 0 : entityId;
   }
 
   /**
    * Drops any recorded ID for a player whose login did not reach the spawn stage.
    *
-   * @param player the player's unique ID
+   * @param playerName the player's name
    */
-  void forget(final UUID player) {
-    pending.remove(player);
-    answered.remove(player);
+  void forget(final String playerName) {
+    final String key = key(playerName);
+    pending.remove(key);
+    answered.remove(key);
   }
 
   /**
@@ -196,6 +220,4 @@ final class ProxyEntityIdChannel extends PacketListenerAbstract {
   static String channel() {
     return CHANNEL;
   }
-
-
 }
