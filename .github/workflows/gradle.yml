@@ -14,6 +14,8 @@ permissions:
 
 env:
   RELEASE_BRANCH: refs/heads/libdeflate
+  # Surfaced here because `secrets` cannot be read from a step-level `if`.
+  MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
 
 jobs:
   build:
@@ -70,6 +72,18 @@ jobs:
         BUILD_NUMBER: ${{ steps.release_tag.outputs.build_nr }}
       run: ./gradlew build
 
+    - name: Upload Jars as Workflow Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: velocity-ctd-jars
+        if-no-files-found: error
+        retention-days: 30
+        path: |
+          bootstrap/build/libs/velocity-bootstrap-*.jar
+          proxy/build/libs/velocity-proxy-*-all.jar
+          paper-plugin/build/libs/VelocitySeamless-*.jar
+          !**/*-sources.jar
+
     - name: Rename Velocity-CTD Fat Jar
       if: github.ref == env.RELEASE_BRANCH
       run: |
@@ -92,7 +106,11 @@ jobs:
         cp "$JAR" "paper-plugin/build/libs/VelocitySeamless-$VERSION-${{ steps.release_tag.outputs.build_nr }}-release.jar"
 
     - name: Publish to Maven Repository
-      if: github.ref == env.RELEASE_BRANCH
+      # Skipped entirely when no Maven credentials are configured. This publishes to the
+      # Velocity-CTD Maven repository, which a fork has no credentials for; without this guard the
+      # step runs, gets a 401 and exits 1, and continue-on-error hides a failure that was never
+      # going to succeed.
+      if: github.ref == env.RELEASE_BRANCH && env.MAVEN_USERNAME != ''
       continue-on-error: true
       env:
         BUILD_NUMBER: ${{ steps.release_tag.outputs.build_nr }}
