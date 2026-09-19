@@ -17,8 +17,14 @@ chunks*. It sends that whenever the destination chunks are not already on the cl
 every teleport that crosses into another region. The plugin drops that request, and supplies the
 acknowledgement the server waits for on the client's behalf, so the player is never held still.
 
-Dimension changes are deliberately left alone. There the client really does have to rebuild its
-world, and hiding the screen would only show the player an empty void while chunks stream in.
+Moves into a *different* world are deliberately left alone. There the client really does have to
+rebuild, and hiding the screen would only show the player an empty void while chunks stream in.
+
+Telling the two apart is the whole job, and the packet type cannot do it: Folia moves a player
+between regions by respawning them, so a cross-region teleport arrives as a respawn packet
+indistinguishable in kind from a nether portal. What separates them is the world each one names, so
+that is what the plugin compares -- the world the client was last placed in against the world the
+new packet puts it in.
 
 ## Requirements
 
@@ -50,6 +56,25 @@ handshake was introduced.
    ```
 
 Both features can be switched off independently in `config.yml`.
+
+## When a loading screen still appears
+
+Debug logging is on by default while this feature is still being proven in the field. The plugin
+logs, for every arriving player and every loading request, what it decided and why -- whether the proxy had an entity ID to reuse, and
+whether the request was suppressed or deliberately allowed through. That turns "it still flashes"
+into a line naming the cause. Set `debug: false` once your setup is confirmed working.
+
+A line naming the cause beats guessing, but these are the usual ones:
+
+1. **Nothing answered `velocityctd:seamless`.** The proxy is not a Velocity-CTD+, or
+   `keep-client-world-on-switch` is not actually on in its `velocity.toml`. Adding the proxy jar
+   does not add the key to an existing config -- an absent key reads as off.
+2. **The proxy had no entity ID to reuse.** Expected on a first join, since there is no previous
+   world to keep. If you see it on a `/server` switch, check the player really moved between two
+   backends rather than reconnecting.
+3. **The screen was allowed through as a world change.** The destination is a different world from
+   the one the player left, which neither half of this tries to hide.
+4. `packetevents` is not installed, so this plugin never loaded.
 
 ## Caveats
 
