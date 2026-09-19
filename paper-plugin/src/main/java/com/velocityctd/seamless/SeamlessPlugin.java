@@ -69,7 +69,7 @@ public final class SeamlessPlugin extends JavaPlugin implements Listener {
     if (reuseEntityId) {
       entityIdApplier = new EntityIdApplier(getLogger());
       if (entityIdApplier.isAvailable()) {
-        entityIdChannel = new ProxyEntityIdChannel(getLogger());
+        entityIdChannel = new ProxyEntityIdChannel(getLogger(), debugLogging ? getLogger() : null);
         PacketEvents.getAPI().getEventManager().registerListener(entityIdChannel);
         getLogger().info("Entity ID reuse enabled; asking the proxy on "
             + ProxyEntityIdChannel.channel() + " as each player logs in.");

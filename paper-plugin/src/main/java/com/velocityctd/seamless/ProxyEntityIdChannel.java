@@ -58,6 +58,13 @@ final class ProxyEntityIdChannel extends PacketListenerAbstract {
   private final Logger logger;
 
   /**
+   * Used only when debug logging is on. The login exchange is invisible from either side on its
+   * own -- a missing entity ID looks identical whether the request never went, the proxy ignored
+   * it, or the answer was genuinely nothing -- so each step of it is narrated. Null when off.
+   */
+  private final Logger debugLogger;
+
+  /**
    * Entity IDs the proxy reported, keyed by player, waiting to be applied when the player spawns.
    * Entries are removed when used, and by the plugin when a login does not complete.
    */
@@ -70,10 +77,17 @@ final class ProxyEntityIdChannel extends PacketListenerAbstract {
    */
   private final Set<UUID> answered = ConcurrentHashMap.newKeySet();
 
-  ProxyEntityIdChannel(final Logger logger) {
+  ProxyEntityIdChannel(final Logger logger, final Logger debugLogger) {
     // Run late enough that the login has a user profile, but this only reads and injects.
     super(PacketListenerPriority.NORMAL);
     this.logger = logger;
+    this.debugLogger = debugLogger;
+  }
+
+  private void debug(final String message) {
+    if (debugLogger != null) {
+      debugLogger.info("[debug] " + message);
+    }
   }
 
   @Override
@@ -90,12 +104,21 @@ final class ProxyEntityIdChannel extends PacketListenerAbstract {
     // just our format version, so a future proxy can tell what this plugin understands.
     final WrapperLoginServerPluginRequest request = new WrapperLoginServerPluginRequest(
         MESSAGE_ID, CHANNEL, new byte[] {SeamlessPayload.FORMAT_VERSION});
-    event.getUser().sendPacket(request);
+    try {
+      event.getUser().sendPacket(request);
+      debug("asked the proxy on " + CHANNEL + " as message " + MESSAGE_ID);
+    } catch (final RuntimeException | LinkageError failed) {
+      debug("could not ask the proxy on " + CHANNEL + " (" + failed + ")");
+    }
   }
 
   private void readAnswer(final PacketReceiveEvent event) {
     final WrapperLoginClientPluginResponse response = new WrapperLoginClientPluginResponse(event);
     if (response.getMessageId() != MESSAGE_ID) {
+      // Not ours -- the server's own player-info forwarding, most likely. Worth a line anyway:
+      // seeing someone else's exchange proves responses reach this listener at all.
+      debug("saw a login plugin response that is not ours: message " + response.getMessageId()
+          + ", successful=" + response.isSuccessful());
       return;
     }
 
@@ -104,7 +127,10 @@ final class ProxyEntityIdChannel extends PacketListenerAbstract {
     event.setCancelled(true);
 
     if (!response.isSuccessful()) {
-      return; // Proxy does not support this, or has the feature switched off.
+      // Proxy does not support this, or has the feature switched off.
+      debug("the proxy declined " + CHANNEL + "; it is not a Velocity-CTD+, or the channel name "
+          + "does not match the one it answers on");
+      return;
     }
 
     final UUID uuid = event.getUser().getUUID();
@@ -117,11 +143,14 @@ final class ProxyEntityIdChannel extends PacketListenerAbstract {
     }
 
     if (uuid == null) {
+      debug("the proxy answered " + CHANNEL + ", but this connection has no UUID yet to file the "
+          + "answer under");
       return;
     }
     answered.add(uuid);
 
     final int entityId = SeamlessPayload.readEntityId(data);
+    debug("the proxy answered " + CHANNEL + " for " + uuid + " with entity ID " + entityId);
     if (entityId == SeamlessPayload.NO_ENTITY_ID) {
       return; // First join, or the proxy has nothing to preserve.
     }
