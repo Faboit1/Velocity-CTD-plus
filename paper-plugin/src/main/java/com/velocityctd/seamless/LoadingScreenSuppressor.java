@@ -25,13 +25,17 @@ import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.protocol.player.User;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerLoaded;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerChangeGameState;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerJoinGame;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerRespawn;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
 /**
- * Stops the "Loading terrain" screen appearing on a teleport within the same world.
+ * Stops the "Loading terrain" screen appearing when the client is not actually changing world.
  *
  * <p>The screen is not a side effect of the teleport itself: the server asks for it, with a Game
  * Event packet whose reason is "start waiting for level chunks". It sends that whenever the
@@ -43,22 +47,34 @@ import java.util.logging.Logger;
  * client that was never told to wait never reports. So the acknowledgement is injected on the
  * client's behalf, exactly as the proxy does for a server switch.</p>
  *
- * <p>A dimension change is left alone. There the client genuinely has to rebuild its world, the
- * screen is honest about what is happening, and hiding it would only show the player an empty void
- * while chunks stream in. Those are recognised by the join game or respawn packet that precedes
- * them.</p>
+ * <p>A real dimension change is left alone. There the client genuinely has to rebuild its world,
+ * the screen is honest about what is happening, and hiding it would only show the player an empty
+ * void while chunks stream in.</p>
  *
- * <p>A world-preserving server switch is the one case where that recognition is exactly backwards.
- * This server sends a join game packet like any other join, but the proxy withholds it, so the
- * client never leaves the world it has -- and the loading request that follows would put a terrain
- * screen over a world that is already there. The plugin is told about those joins in advance, via
- * the entity ID the proxy asked it to reuse, and suppresses them instead of honouring them.</p>
+ * <p>Telling the two apart is the whole job, and the packet type cannot do it. A long teleport is
+ * not always a bare position update: Folia moves a player between regions by respawning them, so a
+ * cross-region teleport arrives as a respawn packet indistinguishable in kind from a nether portal.
+ * What separates them is the world each one names, so that is what this tracks -- the world the
+ * client was last placed in, against the world the new packet puts it in. Same world means the
+ * client keeps its level and the screen is covering terrain it already has.</p>
+ *
+ * <p>A world-preserving server switch is the one case where even a differing world must be
+ * suppressed. This server sends a join game packet like any other join, but the proxy withholds it,
+ * so the client never leaves the world it has. The plugin is told about those joins in advance, via
+ * the entity ID the proxy asked it to reuse.</p>
  */
 final class LoadingScreenSuppressor extends PacketListenerAbstract {
 
   /**
-   * Players whose next "start waiting for level chunks" follows a join or respawn, and so is a real
-   * world change that should keep its loading screen.
+   * The world each client was last placed in, as named by the join game or respawn packet that
+   * placed it there. Absent until the first such packet, which is why a first join is treated as a
+   * world change: the client has no level to keep.
+   */
+  private final Map<UUID, String> clientWorld = new ConcurrentHashMap<>();
+
+  /**
+   * Players whose next "start waiting for level chunks" follows a move into a different world, and
+   * so is a real world change that should keep its loading screen.
    */
   private final Set<UUID> changingWorld = ConcurrentHashMap.newKeySet();
 
@@ -75,8 +91,8 @@ final class LoadingScreenSuppressor extends PacketListenerAbstract {
   private final Set<UUID> suppressNext = ConcurrentHashMap.newKeySet();
 
   /**
-   * Whether ordinary same-world teleports also have their loading screen hidden. Switches are
-   * suppressed regardless, since for those the screen covers a world the client already has.
+   * Whether same-world teleports also have their loading screen hidden. Switches are suppressed
+   * regardless, since for those the screen covers a world the client already has.
    */
   private final boolean hideTeleportScreen;
 
@@ -119,13 +135,7 @@ final class LoadingScreenSuppressor extends PacketListenerAbstract {
 
     if (event.getPacketType() == PacketType.Play.Server.JOIN_GAME
         || event.getPacketType() == PacketType.Play.Server.RESPAWN) {
-      if (seamlessArrivals.remove(uuid)) {
-        // The proxy is withholding this join packet and leaving the client in the world it has.
-        // The loading request that follows would cover a world that never went away.
-        suppressNext.add(uuid);
-      } else {
-        changingWorld.add(uuid);
-      }
+      onPlacedInWorld(event, uuid);
       return;
     }
 
@@ -147,19 +157,77 @@ final class LoadingScreenSuppressor extends PacketListenerAbstract {
 
     if (changingWorld.remove(uuid)) {
       // Genuine world change: let the client rebuild, and show it is doing so.
-      debug("allowing the loading screen for " + uuid + " (join or respawn: a real world change)");
+      debug("allowing the loading screen for " + uuid + " (moved to another world)");
       return;
     }
 
     if (!hideTeleportScreen) {
       debug("allowing the loading screen for " + uuid
-          + " (teleport, and hide-teleport-loading-screen is off)");
+          + " (same world, and hide-teleport-loading-screen is off)");
       return;
     }
 
     debug("suppressing the loading screen for " + uuid + " (same-world teleport)");
     event.setCancelled(true);
     acknowledgeLoaded(event.getUser());
+  }
+
+  /**
+   * Records which world a join game or respawn packet puts the client in, and decides whether the
+   * loading request that follows it is covering a genuine rebuild.
+   *
+   * @param event the join game or respawn packet being sent
+   * @param uuid  the player it is being sent to
+   */
+  private void onPlacedInWorld(final PacketSendEvent event, final UUID uuid) {
+    final String world = worldOf(event);
+    final String previous = world == null ? clientWorld.remove(uuid) : clientWorld.put(uuid, world);
+
+    if (seamlessArrivals.remove(uuid)) {
+      // The proxy is withholding this join packet and leaving the client in the world it has. The
+      // loading request that follows would cover a world that never went away.
+      changingWorld.remove(uuid);
+      suppressNext.add(uuid);
+      debug("a world-preserving switch placed " + uuid + " in " + world
+          + "; its loading screen will be suppressed");
+      return;
+    }
+
+    if (world != null && Objects.equals(world, previous)) {
+      // Same world. Folia respawns a player to move them across a region boundary, so this is how
+      // an ordinary long teleport arrives -- the client keeps its level and needs no screen.
+      changingWorld.remove(uuid);
+      debug(uuid + " was placed in " + world + " again; treating it as a teleport, not a world "
+          + "change");
+      return;
+    }
+
+    changingWorld.add(uuid);
+    debug(uuid + " moved from " + previous + " to " + world
+        + "; its loading screen will be allowed through");
+  }
+
+  /**
+   * Returns the world a join game or respawn packet places the client in.
+   *
+   * <p>Falls back to {@code null} rather than guessing if the packet cannot be read -- a Minecraft
+   * version this build of packetevents does not know, say. A null reads as "this may be a world
+   * change", which keeps the loading screen: the outcome without this plugin at all.</p>
+   *
+   * @param event the join game or respawn packet being sent
+   * @return the world's name, or {@code null} if it could not be determined
+   */
+  private String worldOf(final PacketSendEvent event) {
+    try {
+      if (event.getPacketType() == PacketType.Play.Server.JOIN_GAME) {
+        return new WrapperPlayServerJoinGame(event).getWorldName();
+      }
+      return new WrapperPlayServerRespawn(event).getWorldName().orElse(null);
+    } catch (final RuntimeException | LinkageError failed) {
+      debug("could not read the world out of a " + event.getPacketType().getName() + " packet ("
+          + failed + "); its loading screen will be allowed through");
+      return null;
+    }
   }
 
   /**
@@ -184,6 +252,7 @@ final class LoadingScreenSuppressor extends PacketListenerAbstract {
    * @param player the player's unique ID
    */
   void forget(final UUID player) {
+    clientWorld.remove(player);
     changingWorld.remove(player);
     seamlessArrivals.remove(player);
     suppressNext.remove(player);

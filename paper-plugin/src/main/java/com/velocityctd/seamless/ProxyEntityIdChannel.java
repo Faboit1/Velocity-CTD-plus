@@ -21,10 +21,10 @@ import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketListenerPriority;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
-import com.github.retrooper.packetevents.protocol.player.User;
 import com.github.retrooper.packetevents.wrapper.login.client.WrapperLoginClientPluginResponse;
 import com.github.retrooper.packetevents.wrapper.login.server.WrapperLoginServerPluginRequest;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
@@ -63,6 +63,13 @@ final class ProxyEntityIdChannel extends PacketListenerAbstract {
    */
   private final Map<UUID, Integer> pending = new ConcurrentHashMap<>();
 
+  /**
+   * Players the proxy answered for, whatever the answer was. Kept apart from {@link #pending} so
+   * that "the proxy said this is a first join" can be told from "no proxy answered at all", which
+   * are the same absence of an ID but very different things to go and look at.
+   */
+  private final Set<UUID> answered = ConcurrentHashMap.newKeySet();
+
   ProxyEntityIdChannel(final Logger logger) {
     // Run late enough that the login has a user profile, but this only reads and injects.
     super(PacketListenerPriority.NORMAL);
@@ -100,6 +107,8 @@ final class ProxyEntityIdChannel extends PacketListenerAbstract {
       return; // Proxy does not support this, or has the feature switched off.
     }
 
+    final UUID uuid = event.getUser().getUUID();
+
     final byte[] data = response.getData();
     if (data != null && data.length >= 1 && data[0] != SeamlessPayload.FORMAT_VERSION) {
       logger.warning("The proxy answered " + CHANNEL + " in format " + data[0] + ", which this "
@@ -107,17 +116,26 @@ final class ProxyEntityIdChannel extends PacketListenerAbstract {
       return;
     }
 
+    if (uuid == null) {
+      return;
+    }
+    answered.add(uuid);
+
     final int entityId = SeamlessPayload.readEntityId(data);
     if (entityId == SeamlessPayload.NO_ENTITY_ID) {
       return; // First join, or the proxy has nothing to preserve.
     }
-
-    final User user = event.getUser();
-    final UUID uuid = user.getUUID();
-    if (uuid == null) {
-      return;
-    }
     pending.put(uuid, entityId);
+  }
+
+  /**
+   * Says whether the proxy answered this plugin's login-phase question at all.
+   *
+   * @param player the player's unique ID
+   * @return {@code true} if an answer came back, whatever entity ID it named
+   */
+  boolean proxyAnswered(final UUID player) {
+    return answered.contains(player);
   }
 
   /**
@@ -138,6 +156,7 @@ final class ProxyEntityIdChannel extends PacketListenerAbstract {
    */
   void forget(final UUID player) {
     pending.remove(player);
+    answered.remove(player);
   }
 
   /**

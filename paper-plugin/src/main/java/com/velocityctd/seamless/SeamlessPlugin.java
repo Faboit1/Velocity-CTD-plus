@@ -18,6 +18,7 @@
 package com.velocityctd.seamless;
 
 import com.github.retrooper.packetevents.PacketEvents;
+import java.util.UUID;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -110,12 +111,16 @@ public final class SeamlessPlugin extends JavaPlugin implements Listener {
     if (entityIdChannel == null || entityIdApplier == null) {
       return;
     }
-    final int entityId = entityIdChannel.takeEntityId(event.getPlayer().getUniqueId());
+    final UUID uuid = event.getPlayer().getUniqueId();
+    final int entityId = entityIdChannel.takeEntityId(uuid);
     if (entityId <= 0) {
       if (debugLogging) {
-        getLogger().info("[debug] the proxy reported no entity ID to reuse for "
-            + event.getPlayer().getName() + ": a first join, or the proxy has "
-            + "keep-client-world-on-switch off, or it is not a Velocity-CTD+");
+        getLogger().info(entityIdChannel.proxyAnswered(uuid)
+            ? "[debug] the proxy has no entity ID to reuse for " + event.getPlayer().getName()
+              + ": this is a first join, or the player left a server that did not preserve one"
+            : "[debug] nothing answered " + ProxyEntityIdChannel.channel() + " for "
+              + event.getPlayer().getName() + ": the proxy is not a Velocity-CTD+, or it has "
+              + "keep-client-world-on-switch off");
       }
       return;
     }
@@ -127,7 +132,7 @@ public final class SeamlessPlugin extends JavaPlugin implements Listener {
     // This player is mid-switch with their world intact, so the join game packet about to be sent
     // is not the world change it looks like, and the loading request after it must be dropped.
     if (loadingScreenSuppressor != null) {
-      loadingScreenSuppressor.expectSeamlessArrival(event.getPlayer().getUniqueId());
+      loadingScreenSuppressor.expectSeamlessArrival(uuid);
     }
   }
 
