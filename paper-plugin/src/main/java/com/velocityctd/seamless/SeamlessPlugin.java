@@ -46,6 +46,7 @@ import org.bukkit.plugin.java.JavaPlugin;
  */
 public final class SeamlessPlugin extends JavaPlugin implements Listener {
 
+  private boolean debugLogging;
   private ProxyEntityIdChannel entityIdChannel;
   private LoadingScreenSuppressor loadingScreenSuppressor;
   private EntityIdApplier entityIdApplier;
@@ -57,6 +58,7 @@ public final class SeamlessPlugin extends JavaPlugin implements Listener {
     final boolean reuseEntityId = getConfig().getBoolean("reuse-entity-id-on-switch", true);
     final boolean hideTeleportLoadingScreen =
         getConfig().getBoolean("hide-teleport-loading-screen", true);
+    this.debugLogging = getConfig().getBoolean("debug", false);
 
     if (!reuseEntityId && !hideTeleportLoadingScreen) {
       getLogger().warning("Both features are disabled in config.yml; this plugin will do nothing.");
@@ -77,10 +79,16 @@ public final class SeamlessPlugin extends JavaPlugin implements Listener {
       }
     }
 
-    if (hideTeleportLoadingScreen) {
-      loadingScreenSuppressor = new LoadingScreenSuppressor();
+    // The suppressor is not optional for switches. Reusing the entity ID keeps the client's world,
+    // but this server still asks the client to wait for chunks on every join, and the proxy relays
+    // that ask -- so without the suppressor a "seamless" switch still ends on a terrain screen.
+    if (hideTeleportLoadingScreen || entityIdApplier != null) {
+      loadingScreenSuppressor = new LoadingScreenSuppressor(
+          hideTeleportLoadingScreen, debugLogging ? getLogger() : null);
       PacketEvents.getAPI().getEventManager().registerListener(loadingScreenSuppressor);
-      getLogger().info("Hiding the terrain loading screen on same-world teleports.");
+      getLogger().info(hideTeleportLoadingScreen
+          ? "Hiding the terrain loading screen on same-world teleports and server switches."
+          : "Hiding the terrain loading screen on server switches only.");
     }
 
     getServer().getPluginManager().registerEvents(this, this);
@@ -104,10 +112,22 @@ public final class SeamlessPlugin extends JavaPlugin implements Listener {
     }
     final int entityId = entityIdChannel.takeEntityId(event.getPlayer().getUniqueId());
     if (entityId <= 0) {
+      if (debugLogging) {
+        getLogger().info("[debug] the proxy reported no entity ID to reuse for "
+            + event.getPlayer().getName() + ": a first join, or the proxy has "
+            + "keep-client-world-on-switch off, or it is not a Velocity-CTD+");
+      }
       return;
     }
-    if (entityIdApplier.apply(event.getPlayer(), entityId)) {
-      getLogger().fine(() -> "Reused entity ID " + entityId + " for " + event.getPlayer().getName());
+    if (!entityIdApplier.apply(event.getPlayer(), entityId)) {
+      return;
+    }
+    getLogger().fine(() -> "Reused entity ID " + entityId + " for " + event.getPlayer().getName());
+
+    // This player is mid-switch with their world intact, so the join game packet about to be sent
+    // is not the world change it looks like, and the loading request after it must be dropped.
+    if (loadingScreenSuppressor != null) {
+      loadingScreenSuppressor.expectSeamlessArrival(event.getPlayer().getUniqueId());
     }
   }
 

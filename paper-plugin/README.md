@@ -51,6 +51,21 @@ handshake was introduced.
 
 Both features can be switched off independently in `config.yml`.
 
+## When a loading screen still appears
+
+Set `debug: true` in `config.yml` and restart. The plugin then logs, for every arriving player and
+every loading request, what it decided and why -- whether the proxy had an entity ID to reuse, and
+whether the request was suppressed or deliberately allowed through. That turns "it still flashes"
+into a line naming the cause.
+
+The usual causes, in order:
+
+1. `keep-client-world-on-switch` is not actually on in the proxy's `velocity.toml`. Adding the jar
+   does not add the key to an existing config -- an absent key reads as off.
+2. `packetevents` is not installed, so this plugin never loaded.
+3. The destination is a different dimension from the one the player left, which the proxy refuses
+   to preserve.
+
 ## Caveats
 
 - **All backends must run the same Minecraft version.** With `remove-reconfig` on, the client keeps

@@ -22,3 +22,8 @@ reuse-entity-id-on-switch: true
 # Dimension changes are left alone -- there the client really does have to rebuild its world, and
 # hiding the screen would just show an empty void while chunks stream in.
 hide-teleport-loading-screen: true
+
+# Log what the plugin decides for every loading request and every arriving player. Turn this on when
+# a loading screen still appears and it is not obvious why: it reports whether the proxy had an
+# entity ID to reuse, and whether each request was suppressed or deliberately allowed through.
+debug: false
