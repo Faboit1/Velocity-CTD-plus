@@ -1,7 +1,7 @@
 # VelocitySeamless
 
-Backend companion plugin for Velocity-CTD+'s seamless switching. It removes the two loading
-screens a player would otherwise sit through, and each half works on its own.
+Backend companion plugin for Velocity-CTD+'s seamless switching. Its job is the loading screen on a
+server switch; it can also remove the one on some teleports, where the packets allow it.
 
 ## What it does
 
@@ -11,20 +11,22 @@ gives the player the entity ID their client already holds. The proxy knows that 
 cannot work it out for itself. This plugin asks for it during login and applies it before the
 server writes the join packet.
 
-**No loading screen when teleporting a long way.** The terrain screen is not a side effect of the
-teleport: the server asks for it, with a Game Event packet whose reason is *start waiting for level
-chunks*. It sends that whenever the destination chunks are not already on the client — on Folia,
-every teleport that crosses into another region. The plugin drops that request, and supplies the
-acknowledgement the server waits for on the client's behalf, so the player is never held still.
+**No loading screen when teleporting, where that is possible.** The terrain screen has two causes
+and only one of them can be removed from here. The removable one is a Game Event packet whose
+reason is *start waiting for level chunks*: the plugin drops it and supplies the acknowledgement
+the server waits for, so the player is never held still.
 
-Moves into a *different* world are deliberately left alone. There the client really does have to
-rebuild, and hiding the screen would only show the player an empty void while chunks stream in.
+The one that cannot be removed is a respawn packet. It tells the client to tear down its level, and
+the screen goes up the instant it arrives, before any game event. Dropping the game event after it
+does not take the screen away -- it cancels the chunk handshake, so the server stops treating the
+player as still loading and the screen the respawn drew stays up *longer* while chunks arrive at
+their leisure.
 
-Telling the two apart is the whole job, and the packet type cannot do it: Folia moves a player
-between regions by respawning them, so a cross-region teleport arrives as a respawn packet
-indistinguishable in kind from a nether portal. What separates them is the world each one names, so
-that is what the plugin compares -- the world the client was last placed in against the world the
-new packet puts it in.
+That case is the common one on Folia, which moves a player across a region boundary by respawning
+them. So a long Folia teleport is not suppressible from here, the plugin detects that and leaves it
+alone, and `hide-teleport-loading-screen` is off by default. A world-preserving server switch is
+different: there the proxy withholds the join game packet, so the client is never told to rebuild
+and the screen would be covering a world that never went away.
 
 ## Requirements
 
@@ -52,7 +54,7 @@ handshake was introduced.
 3. Restart. The plugin logs what it enabled:
    ```
    [VelocitySeamless] Entity ID reuse enabled; asking the proxy on velocityctd:seamless as each player logs in.
-   [VelocitySeamless] Hiding the terrain loading screen on same-world teleports.
+   [VelocitySeamless] Hiding the terrain loading screen on server switches only.
    ```
 
 Both features can be switched off independently in `config.yml`.
@@ -72,8 +74,9 @@ A line naming the cause beats guessing, but these are the usual ones:
 2. **The proxy had no entity ID to reuse.** Expected on a first join, since there is no previous
    world to keep. If you see it on a `/server` switch, check the player really moved between two
    backends rather than reconnecting.
-3. **The screen was allowed through as a world change.** The destination is a different world from
-   the one the player left, which neither half of this tries to hide.
+3. **The screen was allowed through because the client was told to rebuild.** A join game or
+   respawn preceded it, so the screen was already drawn and suppressing the request that follows
+   would only make it last longer. On Folia that covers every region-crossing teleport.
 4. `packetevents` is not installed, so this plugin never loaded.
 
 ## Caveats

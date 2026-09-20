@@ -13,15 +13,23 @@
 # server's own internals, which only became reachable by name once Paper moved to Mojang mappings.
 reuse-entity-id-on-switch: true
 
-# Stop the "Loading terrain" screen appearing when a player teleports within the same world.
+# Stop the "Loading terrain" screen appearing when a player teleports without being respawned.
 #
-# On Folia this is what you see crossing into another region; on any server it is what you see on a
-# sufficiently long teleport. The server's request for the screen is dropped and the acknowledgement
-# it waits for is sent on the client's behalf, so the player is never held still.
+# Read the caveat before turning this on. The screen has two causes and only one is suppressible.
+# A "start waiting for level chunks" request can be dropped, and is, which is what this does. A
+# respawn packet cannot: it tells the client to tear down its level, the screen goes up the instant
+# it arrives, and dropping the request that follows does not take the screen away -- it only
+# cancels the chunk handshake, so the server stops treating the player as loading and the screen
+# stays up LONGER while chunks trickle in.
 #
-# Dimension changes are left alone -- there the client really does have to rebuild its world, and
-# hiding the screen would just show an empty void while chunks stream in.
-hide-teleport-loading-screen: true
+# Folia moves a player across a region boundary by respawning them, so most long teleports there
+# are respawns and are not suppressible from here. The plugin detects that and leaves them alone
+# whatever this is set to. What is left for this option are teleports that keep the client's level,
+# which on Folia is the shorter ones that were not going to show a screen anyway.
+#
+# Off by default: on the servers this was built for it has nothing to do, and the failure mode when
+# the detection is wrong is a slower loading screen rather than none.
+hide-teleport-loading-screen: false
 
 # Log what the plugin decides for every loading request and every arriving player. Turn this on when
 # a loading screen still appears and it is not obvious why: it reports whether the proxy had an
