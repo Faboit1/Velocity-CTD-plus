@@ -12,7 +12,10 @@ gives the player the entity ID their client already holds. The proxy knows that 
 cannot work it out for itself. This plugin asks for it during login and applies it before the
 server writes the join packet.
 
-**No loading screen when teleporting within a world.** Two packets put that screen up and both are
+**No loading screen when teleporting within a world** — though behind Velocity-CTD+ you want
+`hide-teleport-loading-screen` in `velocity.toml` instead, which does this in the proxy with no
+plugin on each backend and on any server software. This half is off by default for that reason;
+turn it on only behind a proxy without that option. Either way the mechanism is the same: Two packets put that screen up and both are
 withheld. The *respawn packet* draws it — Folia moves a player across a region boundary by
 respawning them, so on Folia a long teleport **is** a respawn, and nothing dropped afterwards takes
 the screen away because it is already up. The *"start waiting for level chunks" game event* then

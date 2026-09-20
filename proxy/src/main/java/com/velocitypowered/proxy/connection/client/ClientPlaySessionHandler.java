@@ -690,7 +690,9 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
       // the world. The backend waits for that before it accepts movement, so the player would
       // stand still server-side while their client walks away. It is loaded by definition here,
       // so say so on its behalf.
-      serverMc.write(ServerboundPlayerLoadedPacket.INSTANCE);
+      if (acknowledgesLoading(player.getProtocolVersion())) {
+        serverMc.write(ServerboundPlayerLoadedPacket.INSTANCE);
+      }
       destination.setClientLoaded(true);
     } else {
       // Clear tab list to avoid duplicate entries
@@ -777,6 +779,43 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
    */
   public void rememberClientDimension(RespawnPacket respawn) {
     clientDimension = dimensionKey(respawn.getDimensionInfo(), respawn.getDimension());
+  }
+
+  /**
+   * Decides whether a respawn the backend is about to send would leave the client's world exactly
+   * as it is, so that withholding it costs the client nothing and saves it a loading screen.
+   *
+   * <p>Folia moves a player across a region boundary by respawning them, so on Folia this is what
+   * an ordinary long teleport looks like. Both halves have to hold. The world has to be the one
+   * the client already holds, or withholding the packet would leave it in the wrong one. And the
+   * server has to be asking for all player data to be kept: anything less means it wants the
+   * player reset, as after a death, and then the screen is honest.</p>
+   *
+   * @param respawn the respawn packet the backend sent
+   * @return whether the packet can be withheld
+   */
+  public boolean respawnKeepsClientWorld(RespawnPacket respawn) {
+    if (!server.getConfiguration().isHideTeleportLoadingScreen()
+        || player.getProtocolVersion().lessThan(ProtocolVersion.MINECRAFT_1_20_3)) {
+      return false;
+    }
+    if (respawn.getDataToKeep() != RespawnPacket.KEEP_ALL_DATA) {
+      return false;
+    }
+    return clientDimension != null && Objects.equals(
+        dimensionKey(respawn.getDimensionInfo(), respawn.getDimension()), clientDimension);
+  }
+
+  /**
+   * Says whether a client of this version reports back that it has finished loading, and so
+   * whether the proxy has to report it on the client's behalf when it withholds the request to
+   * wait.
+   *
+   * @param version the client's protocol version
+   * @return whether the loaded handshake exists
+   */
+  public static boolean acknowledgesLoading(ProtocolVersion version) {
+    return version.noLessThan(ProtocolVersion.MINECRAFT_1_21_4);
   }
 
   private static @Nullable String dimensionKey(@Nullable DimensionInfo info, int legacyDimension) {

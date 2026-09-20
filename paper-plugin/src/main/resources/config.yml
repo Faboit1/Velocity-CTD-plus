@@ -15,6 +15,12 @@ reuse-entity-id-on-switch: true
 
 # Remove the "Loading terrain" screen on a teleport that does not really change the player's world.
 #
+# Leave this off behind Velocity-CTD+, which does the same job in the proxy: set
+# "hide-teleport-loading-screen" in velocity.toml instead. The proxy sees the same two packets, so
+# doing it there needs no plugin on each backend, works on any server software, and does not make
+# this plugin listen to PlayerLoginEvent's neighbours. Turn this on only behind a proxy that does
+# not have that option.
+#
 # Two packets put that screen up. The respawn packet draws it -- Folia moves a player across a
 # region boundary by respawning them, so on Folia a long teleport IS a respawn. The "start waiting
 # for level chunks" game event then keeps it up. Both are withheld together, and the plugin answers
@@ -23,13 +29,12 @@ reuse-entity-id-on-switch: true
 #
 # A respawn is only withheld when it would not have changed anything the client holds: the same
 # world, and the server asking for all player data to be kept. A different world, or a respawn that
-# resets the player such as after death, is passed through untouched and keeps its screen -- there
-# the client genuinely has to rebuild, and the screen ends as soon as the chunks arrive.
+# resets the player such as after death, is passed through untouched and keeps its screen.
 #
-# Because the server believes the player finished loading as soon as they are moved, chunks around
-# the destination stream in without holding the player still. That is the point, and the cost: on a
-# slow connection you may walk briefly over terrain that has not arrived yet.
-hide-teleport-loading-screen: true
+# Whichever side does it, the server believes the player finished loading as soon as they are
+# moved, so chunks stream in without holding them still: on a slow connection a player may briefly
+# walk over terrain that has not arrived yet.
+hide-teleport-loading-screen: false
 
 # Log what the plugin decides for every loading request and every arriving player. Turn this on when
 # a loading screen still appears and it is not obvious why: it reports whether the proxy had an

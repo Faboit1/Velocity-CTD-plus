@@ -57,7 +57,7 @@ public final class SeamlessPlugin extends JavaPlugin implements Listener {
 
     final boolean reuseEntityId = getConfig().getBoolean("reuse-entity-id-on-switch", true);
     final boolean hideTeleportLoadingScreen =
-        getConfig().getBoolean("hide-teleport-loading-screen", true);
+        getConfig().getBoolean("hide-teleport-loading-screen", false);
     this.debugLogging = getConfig().getBoolean("debug", false);
 
     if (!reuseEntityId && !hideTeleportLoadingScreen) {

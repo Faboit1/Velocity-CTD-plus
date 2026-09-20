@@ -155,6 +155,30 @@ remove-reconfig = false
 # client's world.
 keep-client-world-on-switch = false
 
+# Removes the "Loading terrain" screen on a teleport that does not really change the player's world.
+#
+# Two packets put that screen up. The respawn packet draws it: it tells the client to tear down its
+# level and build a new one, and the screen appears the instant it arrives. Folia moves a player
+# across a region boundary by respawning them, so on Folia an ordinary long teleport is a respawn.
+# The "start waiting for level chunks" game event then keeps it up, and from 1.21.4 the backend
+# holds the player still until the client reports it has loaded.
+#
+# With this on, the proxy withholds both and reports the load to the backend itself, so the client
+# keeps the world it already has and no screen appears. It only does so when the respawn would not
+# have changed anything the client holds: the same dimension the client is already in, and the
+# backend asking for all player data to be kept. A different dimension, or a respawn that resets
+# the player such as after death, is forwarded untouched and keeps its screen -- there the client
+# genuinely has to rebuild, and the screen ends as soon as the chunks arrive.
+#
+# The cost is that the backend believes the player finished loading as soon as they are moved, so
+# chunks stream in without holding them still: on a slow connection a player may briefly walk over
+# terrain that has not arrived yet.
+#
+# Needs no backend plugin, and works on any server software. Has no effect below 1.20.3, where the
+# request to wait for chunks does not exist, or above 1.21.11 for now: packet ids moved at 26.3 and
+# this one's new value is not yet known, so the proxy leaves it alone there rather than guess.
+hide-teleport-loading-screen = false
+
 # If false, disables logging for offline player connections.
 log-offline-connections = true
 

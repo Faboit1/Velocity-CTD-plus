@@ -167,6 +167,7 @@ public final class VelocityConfiguration implements ProxyConfig {
   private final boolean enablePlayerAddressLogging;
   private final boolean removeReconfig;
   private final boolean keepClientWorldOnSwitch;
+  private final boolean hideTeleportLoadingScreen;
 
   @Expose
   private final boolean forceKeyAuthentication;
@@ -266,6 +267,7 @@ public final class VelocityConfiguration implements ProxyConfig {
                                 PingPassthroughMode pingPassthrough,
                                 boolean enablePlayerAddressLogging,
                                 boolean removeReconfig, boolean keepClientWorldOnSwitch,
+                                boolean hideTeleportLoadingScreen,
                                 Servers servers, ForcedHosts forcedHosts,
                                 Map<String, List<String>> commandAliases,
                                 Map<String, List<String>> proxyCommandAliases,
@@ -297,6 +299,7 @@ public final class VelocityConfiguration implements ProxyConfig {
     this.enablePlayerAddressLogging = enablePlayerAddressLogging;
     this.removeReconfig = removeReconfig;
     this.keepClientWorldOnSwitch = keepClientWorldOnSwitch;
+    this.hideTeleportLoadingScreen = hideTeleportLoadingScreen;
     this.servers = servers;
     this.forcedHosts = forcedHosts;
     this.commandAliases = commandAliases;
@@ -856,6 +859,17 @@ public final class VelocityConfiguration implements ProxyConfig {
     return keepClientWorldOnSwitch;
   }
 
+  /**
+   * Returns whether a teleport that puts the player back in the world the client already has
+   * withholds the respawn packet, so the client keeps that world and never draws a loading screen
+   * over rebuilding it.
+   *
+   * @return {@code true} if such respawns are withheld
+   */
+  public boolean isHideTeleportLoadingScreen() {
+    return hideTeleportLoadingScreen;
+  }
+
   public boolean isBungeePluginChannelEnabled() {
     return advanced.isBungeePluginMessageChannel();
   }
@@ -1100,6 +1114,7 @@ public final class VelocityConfiguration implements ProxyConfig {
         .add("enablePlayerAddressLogging", enablePlayerAddressLogging)
         .add("removeReconfig", removeReconfig)
         .add("keepClientWorldOnSwitch", keepClientWorldOnSwitch)
+        .add("hideTeleportLoadingScreen", hideTeleportLoadingScreen)
         .add("forceKeyAuthentication", forceKeyAuthentication)
         .add("packetLimiterConfig", packetLimiterConfig)
         .add("logPlayerConnections", logPlayerConnections)
@@ -1247,6 +1262,7 @@ public final class VelocityConfiguration implements ProxyConfig {
       boolean enablePlayerAddressLogging = config.getOrElse("enable-player-address-logging", true);
       boolean removeReconfig = config.getOrElse("remove-reconfig", false);
       boolean keepClientWorldOnSwitch = config.getOrElse("keep-client-world-on-switch", false);
+      boolean hideTeleportLoadingScreen = config.getOrElse("hide-teleport-loading-screen", false);
       PacketLimiterConfig packetLimiterConfig = PacketLimiterConfig.fromConfig(config.get("packet-limiter"));
       AntiVpnConfig antiVpnConfig = AntiVpnConfig.fromConfig(config.get("anti-vpn"));
       boolean logPlayerConnections = config.getOrElse("log-player-connections", true);
@@ -1352,6 +1368,7 @@ public final class VelocityConfiguration implements ProxyConfig {
           enablePlayerAddressLogging,
           removeReconfig,
           keepClientWorldOnSwitch,
+          hideTeleportLoadingScreen,
           new Servers(serversConfig),
           new ForcedHosts(forcedHostsConfig),
           parseAliasMap(commandAliasesConfig, "command-aliases"),
