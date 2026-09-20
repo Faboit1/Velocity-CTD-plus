@@ -57,7 +57,7 @@ public final class SeamlessPlugin extends JavaPlugin implements Listener {
 
     final boolean reuseEntityId = getConfig().getBoolean("reuse-entity-id-on-switch", true);
     final boolean hideTeleportLoadingScreen =
-        getConfig().getBoolean("hide-teleport-loading-screen", false);
+        getConfig().getBoolean("hide-teleport-loading-screen", true);
     this.debugLogging = getConfig().getBoolean("debug", false);
 
     if (!reuseEntityId && !hideTeleportLoadingScreen) {
@@ -87,8 +87,8 @@ public final class SeamlessPlugin extends JavaPlugin implements Listener {
           hideTeleportLoadingScreen, debugLogging ? getLogger() : null);
       PacketEvents.getAPI().getEventManager().registerListener(loadingScreenSuppressor);
       getLogger().info(hideTeleportLoadingScreen
-          ? "Hiding the terrain loading screen on server switches, and on teleports that do not "
-            + "respawn the player."
+          ? "Removing the terrain loading screen on server switches, and on teleports that keep "
+            + "the player's world."
           : "Hiding the terrain loading screen on server switches only.");
     }
 

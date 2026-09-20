@@ -1,7 +1,8 @@
 # VelocitySeamless
 
-Backend companion plugin for Velocity-CTD+'s seamless switching. Its job is the loading screen on a
-server switch; it can also remove the one on some teleports, where the packets allow it.
+Backend companion plugin for Velocity-CTD+'s seamless switching. It removes the terrain loading
+screen in the two places it is not telling the truth: a server switch that keeps the player's world,
+and a teleport within one.
 
 ## What it does
 
@@ -11,22 +12,24 @@ gives the player the entity ID their client already holds. The proxy knows that 
 cannot work it out for itself. This plugin asks for it during login and applies it before the
 server writes the join packet.
 
-**No loading screen when teleporting, where that is possible.** The terrain screen has two causes
-and only one of them can be removed from here. The removable one is a Game Event packet whose
-reason is *start waiting for level chunks*: the plugin drops it and supplies the acknowledgement
-the server waits for, so the player is never held still.
+**No loading screen when teleporting within a world.** Two packets put that screen up and both are
+withheld. The *respawn packet* draws it — Folia moves a player across a region boundary by
+respawning them, so on Folia a long teleport **is** a respawn, and nothing dropped afterwards takes
+the screen away because it is already up. The *"start waiting for level chunks" game event* then
+keeps it up, and the server holds the player still until the client reports it has loaded. Withhold
+both, answer the server's wait on the client's behalf, and the client keeps the level it has: no
+screen at all.
 
-The one that cannot be removed is a respawn packet. It tells the client to tear down its level, and
-the screen goes up the instant it arrives, before any game event. Dropping the game event after it
-does not take the screen away -- it cancels the chunk handshake, so the server stops treating the
-player as still loading and the screen the respawn drew stays up *longer* while chunks arrive at
-their leisure.
+A respawn is only withheld when it would not have changed anything the client holds — the same
+world, and the server asking for all player data to be kept. A different world, or a respawn that
+resets the player such as after death, passes through untouched and keeps its screen: there the
+client genuinely has to rebuild, and the screen ends soonest by letting the chunk handshake run.
+Suppressing only the game event in that case is the worst of both, since the screen stays and the
+handshake that would have ended it is gone.
 
-That case is the common one on Folia, which moves a player across a region boundary by respawning
-them. So a long Folia teleport is not suppressible from here, the plugin detects that and leaves it
-alone, and `hide-teleport-loading-screen` is off by default. A world-preserving server switch is
-different: there the proxy withholds the join game packet, so the client is never told to rebuild
-and the screen would be covering a world that never went away.
+The cost of the fast path is that the server believes the player finished loading as soon as they
+are moved, so chunks stream in without holding them still. That is the point, and on a slow
+connection it means briefly walking over terrain that has not arrived yet.
 
 ## Requirements
 
@@ -54,7 +57,7 @@ handshake was introduced.
 3. Restart. The plugin logs what it enabled:
    ```
    [VelocitySeamless] Entity ID reuse enabled; asking the proxy on velocityctd:seamless as each player logs in.
-   [VelocitySeamless] Hiding the terrain loading screen on server switches only.
+   [VelocitySeamless] Removing the terrain loading screen on server switches, and on teleports that keep the player's world.
    ```
 
 Both features can be switched off independently in `config.yml`.
@@ -74,9 +77,9 @@ A line naming the cause beats guessing, but these are the usual ones:
 2. **The proxy had no entity ID to reuse.** Expected on a first join, since there is no previous
    world to keep. If you see it on a `/server` switch, check the player really moved between two
    backends rather than reconnecting.
-3. **The screen was allowed through because the client was told to rebuild.** A join game or
-   respawn preceded it, so the screen was already drawn and suppressing the request that follows
-   would only make it last longer. On Folia that covers every region-crossing teleport.
+3. **The screen was allowed through because the client really is rebuilding.** The respawn named a
+   different world, or did not keep all player data — a death, say. Those keep their screen by
+   design; suppressing only the game event there makes it last longer, not shorter.
 4. `packetevents` is not installed, so this plugin never loaded.
 
 ## Caveats

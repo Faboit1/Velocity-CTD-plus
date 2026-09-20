@@ -25,46 +25,55 @@ import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.protocol.player.User;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerLoaded;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerChangeGameState;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerJoinGame;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerRespawn;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
 /**
- * Stops the "Loading terrain" screen appearing when the client is not actually rebuilding its
- * world.
+ * Removes the "Loading terrain" screen where the client is not really rebuilding its world.
  *
- * <p>The screen has two independent causes, and only one of them is ours to remove.</p>
+ * <p>Two packets put that screen up, and both have to be dealt with or it stays.</p>
  *
- * <p>The one we can remove is the Game Event packet whose reason is "start waiting for level
- * chunks". The server sends it when the destination chunks are not already on the client, and it
- * asks the client to wait. Drop it and the wait does not happen -- but then the server is left
- * waiting instead, because from 1.21.2 it holds the player still until the client reports it has
- * loaded, and a client that was never told to wait never reports. So the acknowledgement is
- * injected on the client's behalf.</p>
+ * <p>The <b>respawn packet</b> is the one that draws it. It tells the client to tear down its level
+ * and build a new one, and the screen appears the instant it arrives. Folia moves a player across a
+ * region boundary by respawning them, so on Folia a long teleport is a respawn -- and no amount of
+ * dropping later packets takes that screen away, because it is already up. The only way to remove
+ * it is to not send the respawn. That is safe exactly when the respawn would not have changed
+ * anything the client holds: same world, and the server asking for all player data to be kept.
+ * Then the client keeps the level it has and simply gets moved within it.</p>
  *
- * <p>The one we cannot remove is a respawn packet. That tells the client to tear down its level and
- * build a new one, and the screen goes up the moment it arrives -- before any game event. Dropping
- * the game event afterwards does not take the screen away; it only cancels the chunk handshake, so
- * the server stops treating the player as still loading and the screen that the respawn drew stays
- * up <em>longer</em> while chunks arrive at their leisure.</p>
+ * <p>The <b>game event</b> whose reason is "start waiting for level chunks" is the one that keeps
+ * it up. The server sends it to make the client wait, and from 1.21.2 holds the player still until
+ * the client reports back that it has loaded. Dropping it alone achieves nothing when a respawn
+ * already drew the screen -- worse, the acknowledgement then has to be faked, the server stops
+ * treating the player as loading, and the screen the respawn drew lasts <em>longer</em>. Dropped
+ * together with the respawn, there is no screen at all.</p>
  *
- * <p>That distinction matters most on Folia, which moves a player across a region boundary by
- * respawning them. There a long teleport is a respawn, so its screen is not suppressible from here,
- * and trying makes it worse. So the rule is: suppress only when the client was never told to
- * rebuild.</p>
+ * <p>So the rule is all-or-nothing: suppress both, or neither. A genuine world change -- a
+ * different world, or a respawn that resets the player, such as after death -- gets neither, and
+ * keeps an honest screen that ends as soon as the chunks arrive.</p>
  *
- * <p>The exception is a world-preserving server switch. The destination sends a join game packet
- * like any other join, but the proxy withholds it, so the client never sees it and never leaves the
- * world it has. There the loading request would cover a world that never went away, and the proxy
- * supplies the acknowledgement itself.</p>
+ * <p>A world-preserving server switch reaches the same place by another route: there the proxy
+ * withholds the join game packet, so the client is never told to rebuild, and the proxy sends the
+ * acknowledgement itself.</p>
  */
 final class LoadingScreenSuppressor extends PacketListenerAbstract {
 
   /**
-   * Players who have just been told to rebuild their level, by a join game or respawn packet. The
-   * loading request that follows is honest: the client really is waiting for a world, and the
-   * server's chunk handshake is what ends the wait soonest.
+   * The world each client currently holds, as named by the last join game or respawn it was sent.
+   * A respawn naming this same world is not a world change, whatever else it is.
+   */
+  private final Map<UUID, String> clientWorld = new ConcurrentHashMap<>();
+
+  /**
+   * Players who have just been told to rebuild their level. The loading request that follows is
+   * honest: the client really is waiting for a world, and the chunk handshake is what ends the
+   * wait soonest.
    */
   private final Set<UUID> rebuildingWorld = ConcurrentHashMap.newKeySet();
 
@@ -75,14 +84,16 @@ final class LoadingScreenSuppressor extends PacketListenerAbstract {
   private final Set<UUID> seamlessArrivals = ConcurrentHashMap.newKeySet();
 
   /**
-   * Players whose next loading request is to be dropped, carried from the join game packet to the
-   * game event that follows it.
+   * Players whose next loading request is to be dropped, carried from the packet that decided it
+   * to the game event that follows. The value says whether this listener must also acknowledge the
+   * load: true when it withheld the respawn itself, false on a switch, where the proxy sends the
+   * acknowledgement and a second would be a packet the server never asked for.
    */
-  private final Set<UUID> suppressNext = ConcurrentHashMap.newKeySet();
+  private final Map<UUID, Boolean> suppressNext = new ConcurrentHashMap<>();
 
   /**
-   * Whether a teleport that did not respawn the player also has its loading screen hidden. Switches
-   * are suppressed regardless, since for those the screen covers a world the client already has.
+   * Whether a teleport that does not really change the client's world has its respawn withheld and
+   * its loading screen removed. Switches are suppressed regardless.
    */
   private final boolean hideTeleportScreen;
 
@@ -123,35 +134,84 @@ final class LoadingScreenSuppressor extends PacketListenerAbstract {
       return;
     }
 
-    if (event.getPacketType() == PacketType.Play.Server.JOIN_GAME
-        || event.getPacketType() == PacketType.Play.Server.RESPAWN) {
-      if (seamlessArrivals.remove(uuid)) {
-        // The proxy is withholding this packet and leaving the client in the world it has, so the
-        // client is not rebuilding anything and the request that follows covers nothing.
-        rebuildingWorld.remove(uuid);
-        suppressNext.add(uuid);
-      } else {
-        // The client has been told to rebuild. Its screen is already up, drawn by this packet, and
-        // nothing we drop afterwards takes it away -- only the chunk handshake ends it.
-        rebuildingWorld.add(uuid);
-      }
+    if (event.getPacketType() == PacketType.Play.Server.JOIN_GAME) {
+      onJoinGame(event, uuid);
+    } else if (event.getPacketType() == PacketType.Play.Server.RESPAWN) {
+      onRespawn(event, uuid);
+    } else if (event.getPacketType() == PacketType.Play.Server.CHANGE_GAME_STATE) {
+      onGameState(event, uuid);
+    }
+  }
+
+  private void onJoinGame(final PacketSendEvent event, final UUID uuid) {
+    String world = null;
+    try {
+      world = new WrapperPlayServerJoinGame(event).getWorldName();
+    } catch (final RuntimeException | LinkageError unreadable) {
+      debug("could not read the world out of a join game packet (" + unreadable + ")");
+    }
+    remember(uuid, world);
+
+    if (seamlessArrivals.remove(uuid)) {
+      // The proxy is withholding this packet, so the client never leaves the world it has.
+      rebuildingWorld.remove(uuid);
+      suppressNext.put(uuid, Boolean.FALSE);
+      return;
+    }
+    rebuildingWorld.add(uuid);
+  }
+
+  private void onRespawn(final PacketSendEvent event, final UUID uuid) {
+    String world = null;
+    byte keptData = WrapperPlayServerRespawn.KEEP_NOTHING;
+    try {
+      final WrapperPlayServerRespawn respawn = new WrapperPlayServerRespawn(event);
+      world = respawn.getWorldName().orElse(null);
+      keptData = respawn.getKeptData();
+    } catch (final RuntimeException | LinkageError unreadable) {
+      debug("could not read a respawn packet (" + unreadable + "); leaving it alone");
+    }
+
+    final String previous = clientWorld.get(uuid);
+    remember(uuid, world);
+
+    if (seamlessArrivals.remove(uuid)) {
+      rebuildingWorld.remove(uuid);
+      suppressNext.put(uuid, Boolean.FALSE);
       return;
     }
 
-    if (event.getPacketType() != PacketType.Play.Server.CHANGE_GAME_STATE) {
+    // Withholding a respawn is only safe when it would not have changed anything the client holds.
+    // A different world would leave the client in the wrong one; anything short of keeping all
+    // player data means the server wants the player reset, as after a death, and the screen is
+    // then honest.
+    if (hideTeleportScreen && world != null && Objects.equals(world, previous)
+        && keptData == WrapperPlayServerRespawn.KEEP_ALL_DATA) {
+      debug("withholding a respawn into " + world + " for " + uuid
+          + "; the client keeps the world it has and draws no loading screen");
+      event.setCancelled(true);
+      rebuildingWorld.remove(uuid);
+      suppressNext.put(uuid, Boolean.TRUE);
       return;
     }
 
+    rebuildingWorld.add(uuid);
+  }
+
+  private void onGameState(final PacketSendEvent event, final UUID uuid) {
     final WrapperPlayServerChangeGameState gameState = new WrapperPlayServerChangeGameState(event);
     if (gameState.getReason() != WrapperPlayServerChangeGameState.Reason.START_LOADING_CHUNKS) {
       return;
     }
 
-    if (suppressNext.remove(uuid)) {
-      // No acknowledgement from here: the proxy sends one itself when it withholds a join game,
-      // and a second would be a packet the server never asked for.
-      debug("suppressing the loading screen for " + uuid + " (world-preserving switch)");
+    final Boolean acknowledge = suppressNext.remove(uuid);
+    if (acknowledge != null) {
+      debug("suppressing the loading screen for " + uuid + " (the client kept its world"
+          + (acknowledge ? "" : "; the proxy will acknowledge the load") + ")");
       event.setCancelled(true);
+      if (acknowledge) {
+        acknowledgeLoaded(event.getUser());
+      }
       return;
     }
 
@@ -167,9 +227,19 @@ final class LoadingScreenSuppressor extends PacketListenerAbstract {
       return;
     }
 
-    debug("suppressing the loading screen for " + uuid + " (teleport, no rebuild)");
+    // A loading request with no respawn in front of it: the client still holds its level, so the
+    // screen would cover terrain that is already there.
+    debug("suppressing the loading screen for " + uuid + " (teleport, no respawn)");
     event.setCancelled(true);
     acknowledgeLoaded(event.getUser());
+  }
+
+  private void remember(final UUID player, final String world) {
+    if (world == null) {
+      clientWorld.remove(player);
+    } else {
+      clientWorld.put(player, world);
+    }
   }
 
   /**
@@ -194,6 +264,7 @@ final class LoadingScreenSuppressor extends PacketListenerAbstract {
    * @param player the player's unique ID
    */
   void forget(final UUID player) {
+    clientWorld.remove(player);
     rebuildingWorld.remove(player);
     seamlessArrivals.remove(player);
     suppressNext.remove(player);
