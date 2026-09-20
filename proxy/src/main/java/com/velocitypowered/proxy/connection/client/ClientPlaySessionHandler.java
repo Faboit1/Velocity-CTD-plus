@@ -809,15 +809,14 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
     // reasons to decline are impossible to tell apart from the outside, which has cost enough
     // rounds of guessing already.
     if (!sameWorld || !keepsEverything) {
-      LOGGER.info("[seamless] {}: forwarding a respawn into {} (client holds {}), dataToKeep={}; "
-          + "its loading screen stays", player.getUsername(), respawnedInto, clientDimension,
-          respawn.getDataToKeep());
+      LOGGER.info("[seamless] {}: forwarding a respawn into {} (the client holds {}), "
+              + "dataToKeep={}; its loading screen stays", player.getUsername(),
+          describe(respawnedInto), describe(clientDimension), respawn.getDataToKeep());
       return false;
     }
 
-    LOGGER.info("[seamless] {}: withholding a respawn into {}, dataToKeep={}; the client keeps its "
-        + "world and draws no loading screen", player.getUsername(), respawnedInto,
-        respawn.getDataToKeep());
+    LOGGER.info("[seamless] {}: withholding a respawn into {}; the client keeps its world and "
+        + "draws no loading screen", player.getUsername(), describe(respawnedInto));
     return true;
   }
 
@@ -831,6 +830,26 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
    */
   public static boolean acknowledgesLoading(ProtocolVersion version) {
     return version.noLessThan(ProtocolVersion.MINECRAFT_1_21_4);
+  }
+
+  /**
+   * Renders a level identity for a human. The key itself joins its parts with null bytes, which
+   * read as nothing at all in a log line.
+   *
+   * @param key a level identity, or null if none has been recorded yet
+   * @return something legible
+   */
+  private static String describe(final @Nullable String key) {
+    if (key == null) {
+      return "(nothing yet)";
+    }
+    final String[] parts = key.split("\u0000");
+    if (parts.length < 3) {
+      return key;
+    }
+    // The type identifier is empty from 1.20.5, where it is sent as the registry id instead.
+    final String type = parts[0].isEmpty() ? "type " + parts[2] : parts[0];
+    return parts[1] + " (" + type + ")";
   }
 
   /**
