@@ -611,6 +611,9 @@ public enum StateRegistry {
           map(0x31, MINECRAFT_26_1, false),
           map(0x32, MINECRAFT_26_3, false));
       clientbound.register(
+          // Decoded, not just encoded, from 1.20.3 to 26.2: the proxy has to read a backend's
+          // respawn to know whether it is a world change or a teleport dressed as one. Outside
+          // that range there is nothing it could do with the answer, so it stays encode-only.
           RespawnPacket.class,
           RespawnPacket::new,
           map(0x07, MINECRAFT_1_7_2, true),
@@ -628,12 +631,12 @@ public enum StateRegistry {
           map(0x3D, MINECRAFT_1_19_3, true),
           map(0x41, MINECRAFT_1_19_4, true),
           map(0x43, MINECRAFT_1_20_2, true),
-          map(0x45, MINECRAFT_1_20_3, true),
-          map(0x47, MINECRAFT_1_20_5, true),
-          map(0x4C, MINECRAFT_1_21_2, true),
-          map(0x4B, MINECRAFT_1_21_5, true),
-          map(0x50, MINECRAFT_1_21_9, true),
-          map(0x52, MINECRAFT_26_1, true),
+          map(0x45, MINECRAFT_1_20_3, false),
+          map(0x47, MINECRAFT_1_20_5, false),
+          map(0x4C, MINECRAFT_1_21_2, false),
+          map(0x4B, MINECRAFT_1_21_5, false),
+          map(0x50, MINECRAFT_1_21_9, false),
+          map(0x52, MINECRAFT_26_1, false),
           map(0x54, MINECRAFT_26_3, true));
       clientbound.register(
           RemoveResourcePackPacket.class,
