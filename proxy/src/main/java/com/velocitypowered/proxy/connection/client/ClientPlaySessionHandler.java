@@ -833,11 +833,30 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
     return version.noLessThan(ProtocolVersion.MINECRAFT_1_21_4);
   }
 
-  private static @Nullable String dimensionKey(@Nullable DimensionInfo info, int legacyDimension) {
+  /**
+   * The identity of a client's level, for deciding whether it can be kept.
+   *
+   * <p>Deliberately the dimension <em>type</em> and not the world name. The type is what the
+   * client's level is built from: how tall it is, and so how many sections it reads out of every
+   * chunk packet; its sky, fog and ambient light; whether it has a ceiling. Two worlds sharing a
+   * type are identical to a client in every way except which chunks arrive, so moving between them
+   * needs no rebuild -- the new chunks simply replace the old ones.</p>
+   *
+   * <p>Two <em>types</em> differing is a hard stop, and not only a cosmetic one. The overworld is
+   * 384 blocks tall and the nether 256, so a client still holding the overworld would read the
+   * wrong number of sections out of every nether chunk and make nonsense of it. That is why a real
+   * dimension change keeps its loading screen: the client genuinely has to build a new level, and
+   * the screen is covering honest work.</p>
+   *
+   * @param info            the dimension the packet named, or null before 1.16
+   * @param legacyDimension the numeric dimension used before 1.16
+   * @return a key that is equal exactly when the client's level need not be rebuilt
+   */
+  static @Nullable String dimensionKey(@Nullable DimensionInfo info, int legacyDimension) {
     if (info == null) {
       return Integer.toString(legacyDimension);
     }
-    return info.getRegistryIdentifier() + "\u0000" + info.getLevelName();
+    return info.getRegistryIdentifier();
   }
 
   /**
