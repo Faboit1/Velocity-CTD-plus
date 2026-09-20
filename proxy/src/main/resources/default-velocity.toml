@@ -165,21 +165,19 @@ keep-client-world-on-switch = false
 #
 # With this on, the proxy withholds both and reports the load to the backend itself, so the client
 # keeps the world it already has and no screen appears. It only does so when the respawn would not
-# have changed anything the client holds: the same dimension TYPE the client is already in, and the
-# backend asking for all player data to be kept.
+# have changed anything the client holds: the same dimension the client is already in, and the
+# backend asking for all player data to be kept. A different dimension, or a respawn that resets
+# the player such as after death, is forwarded untouched and keeps its screen -- there the client
+# really does have to build a new level, and the screen covers honest work that ends as soon as the
+# chunks arrive.
 #
-# The type, not the world name, because the type is what a client's level is built from -- how tall
-# it is and so how many sections it reads out of every chunk packet, its sky and fog, its ambient
-# light, whether it has a ceiling. Two worlds sharing a type are identical to a client bar which
-# chunks arrive, so moving between them is covered too: on a multiworld server, a hub and a
-# survival world that are both overworld-type change with no screen at all.
-#
-# Two types differing is a hard stop, and not a cosmetic one. The overworld is 384 blocks tall and
-# the nether 256, so a client still holding the overworld would read the wrong number of sections
-# out of every nether chunk and make nonsense of it. An overworld/nether/end change therefore keeps
-# its screen, as does a respawn that resets the player such as after death: there the client really
-# does have to build a new level, and the screen covers honest work that ends as soon as the chunks
-# arrive.
+# A dimension change is never skipped, and cannot be. The dimension type is what a client's level
+# is built from: how tall it is and so how many sections it reads out of every chunk packet, its
+# sky and fog, whether it has a ceiling. The overworld is 384 blocks tall and the nether 256, so a
+# client kept in the overworld would read the wrong number of sections out of every nether chunk
+# and hang on the terrain screen forever. Two worlds sharing a type are interchangeable to a client
+# and are refused here anyway: being stricter than necessary costs a loading screen, being looser
+# costs the session.
 #
 # The cost is that the backend believes the player finished loading as soon as they are moved, so
 # chunks stream in without holding them still: on a slow connection a player may briefly walk over

@@ -18,7 +18,6 @@
 package com.velocitypowered.proxy.connection.client;
 
 import static com.velocitypowered.api.network.ProtocolVersion.MINECRAFT_1_21_9;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 import com.velocitypowered.proxy.connection.registry.DimensionInfo;
@@ -27,29 +26,52 @@ import org.junit.jupiter.api.Test;
 /**
  * Pins what counts as "the same level" to a client, which is what decides whether the proxy may
  * withhold a respawn and spare the player a loading screen.
+ *
+ * <p>Getting this wrong in the permissive direction is not a missing optimisation, it is a broken
+ * session: a withheld nether portal leaves the client reading 16-section nether chunks as a
+ * 384-block overworld, and it hangs on the terrain screen forever.</p>
  */
 class ClientWorldIdentityTest {
 
-  private static String keyOf(String dimensionType, String worldName) {
+  /**
+   * Builds a key the way a respawn packet from the given era would.
+   *
+   * @param typeIdentifier the dimension type as a string, empty from 1.20.5 where it is a registry
+   *                       id instead
+   * @param worldName      the level name
+   * @param typeId         the dimension type as a registry id, used from 1.20.5
+   * @return the level identity
+   */
+  private static String keyOf(String typeIdentifier, String worldName, int typeId) {
     return ClientPlaySessionHandler.dimensionKey(
-        new DimensionInfo(dimensionType, worldName, false, false, MINECRAFT_1_21_9), 0);
+        new DimensionInfo(typeIdentifier, worldName, false, false, MINECRAFT_1_21_9), typeId);
   }
 
   @Test
-  void treatsTwoWorldsOfOneTypeAsTheSameLevel() {
-    // A client's level is built from the dimension type, so two worlds sharing one are identical
-    // to it bar which chunks arrive. Moving between them needs no rebuild and no loading screen.
-    assertEquals(keyOf("minecraft:overworld", "minecraft:world"),
-        keyOf("minecraft:overworld", "minecraft:world_the_second"));
+  void distinguishesWorldsWhenTheTypeIsSentAsRegistryId() {
+    // The shape every version from 1.20.5 sends: no type string at all, just a registry id and a
+    // level name. A key built only from the identifier compares "" against "" and calls the nether
+    // the overworld, which is exactly how this broke.
+    assertNotEquals(keyOf("", "minecraft:overworld", 0),
+        keyOf("", "minecraft:the_nether", 1));
   }
 
   @Test
   void keepsRealDimensionChangesApart() {
-    // Not merely cosmetic: the overworld is 384 blocks tall and the nether 256, so a client still
-    // holding the overworld would read the wrong number of sections out of every nether chunk.
-    assertNotEquals(keyOf("minecraft:overworld", "minecraft:world"),
-        keyOf("minecraft:the_nether", "minecraft:world_nether"));
-    assertNotEquals(keyOf("minecraft:the_nether", "minecraft:world_nether"),
-        keyOf("minecraft:the_end", "minecraft:world_the_end"));
+    // The overworld is 384 blocks tall and the nether 256, so a client still holding the overworld
+    // would read the wrong number of sections out of every nether chunk. Pre-1.20.5 shape, where
+    // the type does arrive as a string.
+    assertNotEquals(keyOf("minecraft:overworld", "minecraft:world", 0),
+        keyOf("minecraft:the_nether", "minecraft:world_nether", 0));
+    assertNotEquals(keyOf("minecraft:the_nether", "minecraft:world_nether", 0),
+        keyOf("minecraft:the_end", "minecraft:world_the_end", 0));
+  }
+
+  @Test
+  void keepsSeparateWorldsApartEvenWithinOneType() {
+    // Deliberately stricter than a client requires: two overworld-type worlds are interchangeable
+    // to it, and are still refused. The cost is a loading screen nobody needed; the cost of the
+    // opposite mistake is a session that never finishes loading.
+    assertNotEquals(keyOf("", "minecraft:world", 0), keyOf("", "minecraft:world_the_second", 0));
   }
 }
