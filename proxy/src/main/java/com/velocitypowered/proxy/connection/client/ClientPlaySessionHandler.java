@@ -799,11 +799,26 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
         || player.getProtocolVersion().lessThan(ProtocolVersion.MINECRAFT_1_20_3)) {
       return false;
     }
-    if (respawn.getDataToKeep() != RespawnPacket.KEEP_ALL_DATA) {
+
+    final String respawnedInto = dimensionKey(respawn.getDimensionInfo(), respawn.getDimension());
+    final boolean sameWorld = clientDimension != null
+        && Objects.equals(respawnedInto, clientDimension);
+    final boolean keepsEverything = respawn.getDataToKeep() == RespawnPacket.KEEP_ALL_DATA;
+
+    // One line per respawn, and only for those who turned this on. A respawn is rare and the two
+    // reasons to decline are impossible to tell apart from the outside, which has cost enough
+    // rounds of guessing already.
+    if (!sameWorld || !keepsEverything) {
+      LOGGER.info("[seamless] {}: forwarding a respawn into {} (client holds {}), dataToKeep={}; "
+          + "its loading screen stays", player.getUsername(), respawnedInto, clientDimension,
+          respawn.getDataToKeep());
       return false;
     }
-    return clientDimension != null && Objects.equals(
-        dimensionKey(respawn.getDimensionInfo(), respawn.getDimension()), clientDimension);
+
+    LOGGER.info("[seamless] {}: withholding a respawn into {}, dataToKeep={}; the client keeps its "
+        + "world and draws no loading screen", player.getUsername(), respawnedInto,
+        respawn.getDataToKeep());
+    return true;
   }
 
   /**

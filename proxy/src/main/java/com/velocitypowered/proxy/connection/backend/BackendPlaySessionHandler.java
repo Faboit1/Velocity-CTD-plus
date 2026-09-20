@@ -204,9 +204,13 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
     // A backend can move the player between dimensions without a server switch (a nether portal,
     // a /world command). Record it, or the dimension we hold goes stale and the next switch
     // needlessly refuses to preserve the client's world.
+    // Asked before the dimension is recorded, not after: recording first would overwrite the very
+    // value the question compares against, and every respawn would look like it kept the world --
+    // a nether portal included, which would leave the client in the wrong one.
+    final boolean keepsClientWorld = playerSessionHandler.respawnKeepsClientWorld(packet);
     playerSessionHandler.rememberClientDimension(packet);
 
-    if (playerSessionHandler.respawnKeepsClientWorld(packet)) {
+    if (keepsClientWorld) {
       // The respawn puts the player back in the world the client already has. Sending it would
       // make the client tear that world down and draw a loading screen over the rebuild, which is
       // the whole of what a player sees on a long teleport. Withholding it leaves the client where
@@ -220,8 +224,14 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
 
   @Override
   public boolean handle(GameEventPacket packet) {
-    if (packet.getEvent() != GameEventPacket.START_WAITING_FOR_LEVEL_CHUNKS
-        || !withholdNextLoadingRequest) {
+    if (packet.getEvent() != GameEventPacket.START_WAITING_FOR_LEVEL_CHUNKS) {
+      return false; // Forward
+    }
+    if (!withholdNextLoadingRequest) {
+      if (server.getConfiguration().isHideTeleportLoadingScreen()) {
+        LOGGER.info("[seamless] {}: letting the request to wait for chunks through; the respawn "
+            + "in front of it was not withheld", serverConn.getPlayer().getUsername());
+      }
       return false; // Forward
     }
     withholdNextLoadingRequest = false;
