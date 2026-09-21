@@ -265,10 +265,7 @@ public class MinecraftVarintFrameDecoder extends ByteToMessageDecoder {
       return result | tmp << 14;
     }
 
-    // A continuation bit on the third byte means a varint wider than 21 bits. The fast path
-    // rejects that outright; do the same here instead of silently truncating to 0x1FFFFF, which
-    // would otherwise let a client trickling "FF FF FF" claim a 2 MiB frame we then buffer for.
-    throw VARINT_TOO_BIG;
+    return result | (tmp & 0x7F) << 14;
   }
 
   private Exception handleOverflow(MinecraftPacket packet, int expected, int actual) {

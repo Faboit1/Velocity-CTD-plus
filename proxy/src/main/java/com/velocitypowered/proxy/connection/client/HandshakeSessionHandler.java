@@ -218,24 +218,21 @@ public class HandshakeSessionHandler implements MinecraftSessionHandler {
    */
   @VisibleForTesting
   static String cleanVhost(String hostname) {
-    // Work out how much of the hostname survives before allocating anything: this runs for every
-    // handshake, and the overwhelming majority of hostnames come through unchanged.
-    int length = hostname.length();
-
     // Clean out any anything after any zero bytes (this includes BungeeCord forwarding and the
     // legacy Forge handshake indicator).
-    final int zeroIdx = hostname.indexOf('\0');
+    String cleaned = hostname;
+    int zeroIdx = cleaned.indexOf('\0');
     if (zeroIdx > -1) {
-      length = zeroIdx;
+      cleaned = hostname.substring(0, zeroIdx);
     }
 
     // If we connect through an SRV record, there will be a period at the end (DNS usually elides
     // this ending octet).
-    if (length > 0 && hostname.charAt(length - 1) == '.') {
-      length--;
+    if (!cleaned.isEmpty() && cleaned.charAt(cleaned.length() - 1) == '.') {
+      cleaned = cleaned.substring(0, cleaned.length() - 1);
     }
 
-    return length == hostname.length() ? hostname : hostname.substring(0, length);
+    return cleaned;
   }
 
   @Override

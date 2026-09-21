@@ -22,8 +22,6 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import io.netty.util.concurrent.FastThreadLocalThread;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -31,53 +29,22 @@ import org.jetbrains.annotations.NotNull;
  */
 public class VelocityNettyThreadFactory implements ThreadFactory {
 
-  private static final Logger LOGGER = LogManager.getLogger(VelocityNettyThreadFactory.class);
-
-  /**
-   * Shared handler so a thread that dies to an unexpected throwable leaves a trace instead of
-   * disappearing silently. Static, so it costs nothing per thread.
-   */
-  private static final Thread.UncaughtExceptionHandler UNCAUGHT_EXCEPTION_HANDLER =
-      (thread, throwable) ->
-          LOGGER.error("Uncaught exception in thread {}", thread.getName(), throwable);
-
   private final AtomicInteger threadNumber = new AtomicInteger();
 
-  /**
-   * The part of the name format before the {@code %d}, precomputed so {@link #newThread} can
-   * concatenate instead of running {@link String#format}.
-   */
-  private final String namePrefix;
+  private final String nameFormat;
 
-  /**
-   * The part of the name format after the {@code %d}, usually empty.
-   */
-  private final String nameSuffix;
-
-  /**
-   * Creates a factory naming its threads after {@code nameFormat}.
-   *
-   * @param nameFormat the thread name format, which must contain a single {@code %d}
-   */
   public VelocityNettyThreadFactory(String nameFormat) {
-    checkNotNull(nameFormat, "nameFormat");
-    final int placeholder = nameFormat.indexOf("%d");
-    if (placeholder < 0) {
-      throw new IllegalArgumentException("nameFormat must contain a %d placeholder");
-    }
-    this.namePrefix = nameFormat.substring(0, placeholder);
-    this.nameSuffix = nameFormat.substring(placeholder + 2);
+    this.nameFormat = checkNotNull(nameFormat, "nameFormat");
   }
 
   @Override
   public Thread newThread(@NotNull Runnable r) {
-    final String name = nameSuffix.isEmpty()
-        ? namePrefix + threadNumber.getAndIncrement()
-        : namePrefix + threadNumber.getAndIncrement() + nameSuffix;
-    // Hand the runnable to the constructor rather than wrapping it in an anonymous subclass:
-    // one fewer class to load and one fewer object per thread.
-    final Thread thread = new FastThreadLocalThread(r, name);
-    thread.setUncaughtExceptionHandler(UNCAUGHT_EXCEPTION_HANDLER);
-    return thread;
+    String name = String.format(nameFormat, threadNumber.getAndIncrement());
+    return new FastThreadLocalThread(name) {
+      @Override
+      public void run() {
+        r.run();
+      }
+    };
   }
 }

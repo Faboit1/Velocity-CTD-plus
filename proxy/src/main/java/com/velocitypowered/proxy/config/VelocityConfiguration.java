@@ -256,7 +256,6 @@ public final class VelocityConfiguration implements ProxyConfig {
    */
   @Expose
   private final Map<String, Integer> playerCaps;
-  private final AntiVpnConfig antiVpn;
 
   private VelocityConfiguration(String bind, List<String> motd, List<String> motdHover,
                                 int showMaxPlayers, boolean onlineMode,
@@ -281,8 +280,7 @@ public final class VelocityConfiguration implements ProxyConfig {
                                 String maximumVersion,
                                 Redis redis, Queue queue, Map<String, List<String>> slashServers,
                                 Map<String, List<ServerLink>> serverLinks, List<ProxyAddress> proxyAddresses,
-                                DynamicProxyFilterMode dynamicProxyFilter, Map<String, Integer> playerCaps,
-                                AntiVpnConfig antiVpn) {
+                                DynamicProxyFilterMode dynamicProxyFilter, Map<String, Integer> playerCaps) {
     this.bind = bind;
     this.motd = motd;
     this.motdHover = motdHover;
@@ -327,7 +325,6 @@ public final class VelocityConfiguration implements ProxyConfig {
     this.proxyAddresses = proxyAddresses;
     this.dynamicProxyFilter = dynamicProxyFilter;
     this.playerCaps = playerCaps;
-    this.antiVpn = antiVpn;
   }
 
   /**
@@ -1059,15 +1056,6 @@ public final class VelocityConfiguration implements ProxyConfig {
   }
 
   /**
-   * Gets the anti-VPN configuration.
-   *
-   * @return the anti-VPN settings
-   */
-  public AntiVpnConfig getAntiVpn() {
-    return antiVpn;
-  }
-
-  /**
    * Gets all server links scoped to the provided server name, including global ones.
    *
    * @param serverName the backend server name (e.g., "lobby")
@@ -1132,7 +1120,6 @@ public final class VelocityConfiguration implements ProxyConfig {
         .add("proxyAddresses", proxyAddresses)
         .add("dynamicProxyFilter", dynamicProxyFilter)
         .add("playerCaps", playerCaps)
-        .add("antiVpn", antiVpn)
         .toString();
   }
 
@@ -1264,7 +1251,6 @@ public final class VelocityConfiguration implements ProxyConfig {
       boolean keepClientWorldOnSwitch = config.getOrElse("keep-client-world-on-switch", false);
       boolean hideTeleportLoadingScreen = config.getOrElse("hide-teleport-loading-screen", false);
       PacketLimiterConfig packetLimiterConfig = PacketLimiterConfig.fromConfig(config.get("packet-limiter"));
-      AntiVpnConfig antiVpnConfig = AntiVpnConfig.fromConfig(config.get("anti-vpn"));
       boolean logPlayerConnections = config.getOrElse("log-player-connections", true);
       boolean logPlayerDisconnections = config.getOrElse("log-player-disconnections", true);
       boolean logOfflineConnections = config.getOrElse("log-offline-connections", true);
@@ -1395,8 +1381,7 @@ public final class VelocityConfiguration implements ProxyConfig {
           links,
           addresses,
           filter,
-          playerCaps,
-          antiVpnConfig
+          playerCaps
       );
     }
   }
@@ -2649,112 +2634,6 @@ public final class VelocityConfiguration implements ProxyConfig {
       } else {
         return DEFAULT;
       }
-    }
-  }
-
-  /**
-   * Configuration for the built-in anti-VPN checks.
-   *
-   * @param enabled              whether any anti-VPN checking happens at all
-   * @param logBlocked           whether refused connections are logged
-   * @param refreshMinutes       how often the address feeds are re-downloaded, {@code 0} to load
-   *                             them only at startup
-   * @param feeds                URLs of address feeds listing VPN, proxy and datacentre addresses
-   * @param whitelistFeeds       URLs of address feeds that override {@code feeds}
-   * @param whitelistedIps       addresses and CIDR ranges that are never blocked
-   * @param whitelistedUsers     usernames that are never blocked, matched case-insensitively
-   * @param onlineEnabled        whether reputation APIs are consulted for addresses no feed lists
-   * @param onlineApis           API URL templates, where {@code {ip}} is replaced by the address
-   * @param onlineTimeoutMillis  how long to wait for a single API response
-   * @param onlineCacheMinutes   how long an API verdict is reused
-   * @param onlineCacheSize      the maximum number of cached API verdicts
-   * @param onlineMaxConcurrent  the maximum number of API lookups in flight at once
-   */
-  public record AntiVpnConfig(
-      boolean enabled,
-      boolean logBlocked,
-      int refreshMinutes,
-      List<String> feeds,
-      List<String> whitelistFeeds,
-      List<String> whitelistedIps,
-      List<String> whitelistedUsers,
-      boolean onlineEnabled,
-      List<String> onlineApis,
-      int onlineTimeoutMillis,
-      int onlineCacheMinutes,
-      int onlineCacheSize,
-      int onlineMaxConcurrent) {
-
-    /**
-     * Address feeds used when the configuration does not list any. These are public, free and
-     * require no API key.
-     */
-    private static final List<String> DEFAULT_FEEDS = ImmutableList.of(
-        "https://raw.githubusercontent.com/X4BNet/lists_vpn/main/output/vpn/ipv4.txt",
-        "https://raw.githubusercontent.com/X4BNet/lists_vpn/main/output/datacenter/ipv4.txt",
-        "https://check.torproject.org/torbulkexitlist",
-        "https://raw.githubusercontent.com/scriptzteam/ProtonVPN-VPN-IPs/main/exit_ips.txt",
-        "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
-        "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks4.txt",
-        "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
-        "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
-        "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks4.txt",
-        "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt"
-    );
-
-    /**
-     * Reputation APIs used when {@code online-enabled} is on but no APIs are configured. All have
-     * a free tier that needs no key; heavy traffic wants a keyed endpoint here instead.
-     */
-    private static final List<String> DEFAULT_ONLINE_APIS = ImmutableList.of(
-        "https://proxycheck.io/v2/{ip}?vpn=1&asn=1",
-        "https://api.ipapi.is/?q={ip}"
-    );
-
-    public static final AntiVpnConfig DEFAULT = new AntiVpnConfig(
-        false, true, 360, DEFAULT_FEEDS, ImmutableList.of(), ImmutableList.of(),
-        ImmutableList.of(), false, DEFAULT_ONLINE_APIS, 1500, 720, 50_000, 100);
-
-    /**
-     * Reads the anti-VPN settings from a config section.
-     *
-     * @param config the {@code [anti-vpn]} section, or {@code null} if absent
-     * @return the parsed settings, or {@link #DEFAULT} if the section is absent
-     */
-    public static AntiVpnConfig fromConfig(final CommentedConfig config) {
-      if (config == null) {
-        return DEFAULT;
-      }
-      return new AntiVpnConfig(
-          config.getOrElse("enabled", DEFAULT.enabled()),
-          config.getOrElse("log-blocked", DEFAULT.logBlocked()),
-          config.getIntOrElse("refresh-minutes", DEFAULT.refreshMinutes()),
-          stringList(config, "lists", DEFAULT.feeds()),
-          stringList(config, "whitelist-lists", DEFAULT.whitelistFeeds()),
-          stringList(config, "whitelisted-ips", DEFAULT.whitelistedIps()),
-          stringList(config, "whitelisted-users", DEFAULT.whitelistedUsers()),
-          config.getOrElse("online-enabled", DEFAULT.onlineEnabled()),
-          stringList(config, "online-apis", DEFAULT.onlineApis()),
-          config.getIntOrElse("online-timeout-ms", DEFAULT.onlineTimeoutMillis()),
-          config.getIntOrElse("online-cache-minutes", DEFAULT.onlineCacheMinutes()),
-          config.getIntOrElse("online-cache-size", DEFAULT.onlineCacheSize()),
-          config.getIntOrElse("online-max-concurrent", DEFAULT.onlineMaxConcurrent())
-      );
-    }
-
-    private static List<String> stringList(final CommentedConfig config, final String key,
-        final List<String> fallback) {
-      final Object value = config.get(key);
-      if (!(value instanceof List<?> list)) {
-        return fallback;
-      }
-      final ImmutableList.Builder<String> builder = ImmutableList.builder();
-      for (final Object element : list) {
-        if (element instanceof String string && !string.isBlank()) {
-          builder.add(string);
-        }
-      }
-      return builder.build();
     }
   }
 

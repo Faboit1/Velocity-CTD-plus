@@ -104,13 +104,6 @@ public class MinecraftConnection extends ChannelInboundHandlerAdapter {
   public static final int MAX_CLIENT_PACKET_SIZE = Integer.getInteger("velocity.max-client-packet-size", 2097152);
 
   /**
-   * Rendered once at class-init instead of per offending packet. A client spraying oversized
-   * packets should not also make us run the translation machinery on the event loop.
-   */
-  private static final Component OVERSIZED_PACKET_KICK_MESSAGE = GlobalTranslator.render(
-      Component.translatable("velocity.kick.oversized-packet"), Locale.getDefault());
-
-  /**
    * Maximum time to wait for {@link #closeWith(Object)}'s write-and-flush to complete before
    * forcibly closing the channel. Guards against a stuck outbound buffer leaving the connection
    * alive until Netty's read timeout.
@@ -210,7 +203,8 @@ public class MinecraftConnection extends ChannelInboundHandlerAdapter {
           if (activeSessionHandler instanceof ClientPlaySessionHandler) {
             if (MAX_CLIENT_PACKET_SIZE > 0 && buf.readableBytes() > MAX_CLIENT_PACKET_SIZE) {
               LOGGER.error("{}: received oversized packet ({} bytes > {} byte limit)", association, buf.readableBytes(), MAX_CLIENT_PACKET_SIZE);
-              closeWith(DisconnectPacket.create(OVERSIZED_PACKET_KICK_MESSAGE, getProtocolVersion(), getState()));
+              Component translated = GlobalTranslator.render(Component.translatable("velocity.kick.oversized-packet"), Locale.getDefault());
+              closeWith(DisconnectPacket.create(translated, getProtocolVersion(), getState()));
               return;
             }
           }
