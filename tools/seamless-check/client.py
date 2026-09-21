@@ -57,11 +57,11 @@ try:
                 break
             continue
 
-        # Play, for 1.21.11: join game is 0x30, keep alive 0x2B in and 0x20 out.
+        # Play, for 1.21.11: join game is 0x30, keep alive 0x2B inbound and 0x1B outbound.
         if pid == 0x30:
             entity_id = int.from_bytes(payload[:4], "big", signed=True)
             log(f"JOIN GAME: entity id {entity_id}")
         elif pid == 0x2B:
-            send(sock, 0x20, payload)
+            send(sock, 0x1B, payload)
 except Exception as done:                                          # noqa: BLE001
     log(f"{type(done).__name__}: {done}")

@@ -51,6 +51,7 @@ import com.velocitypowered.proxy.protocol.packet.ClientSettingsPacket;
 import com.velocitypowered.proxy.protocol.packet.ClientboundCookieRequestPacket;
 import com.velocitypowered.proxy.protocol.packet.ClientboundStoreCookiePacket;
 import com.velocitypowered.proxy.protocol.packet.DisconnectPacket;
+import com.velocitypowered.proxy.protocol.packet.GameEventPacket;
 import com.velocitypowered.proxy.protocol.packet.KeepAlivePacket;
 import com.velocitypowered.proxy.protocol.packet.LegacyPlayerListItemPacket;
 import com.velocitypowered.proxy.protocol.packet.PluginMessagePacket;
@@ -60,6 +61,7 @@ import com.velocitypowered.proxy.protocol.packet.ResourcePackRequestPacket;
 import com.velocitypowered.proxy.protocol.packet.ResourcePackResponsePacket;
 import com.velocitypowered.proxy.protocol.packet.RespawnPacket;
 import com.velocitypowered.proxy.protocol.packet.ServerDataPacket;
+import com.velocitypowered.proxy.protocol.packet.ServerboundPlayerLoadedPacket;
 import com.velocitypowered.proxy.protocol.packet.TabCompleteResponsePacket;
 import com.velocitypowered.proxy.protocol.packet.TransferPacket;
 import com.velocitypowered.proxy.protocol.packet.UpsertPlayerInfoPacket;
@@ -88,6 +90,14 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
   private static final Logger LOGGER = LogManager.getLogger(BackendPlaySessionHandler.class);
 
   private static final boolean BACKPRESSURE_LOG = Boolean.getBoolean("velocity.log-server-backpressure");
+
+  /**
+   * Set when a respawn was withheld, and read by the request to wait for chunks that follows it.
+   * The two only make sense together: withholding the respawn without the request leaves a screen
+   * with nothing to end it, and withholding the request without the respawn removes the handshake
+   * that would have ended the screen the respawn drew.
+   */
+  private boolean withholdNextLoadingRequest;
 
   private static final int MAXIMUM_PACKETS_TO_FLUSH = Integer.getInteger("velocity.max-packets-per-flush", 8192);
 
@@ -194,8 +204,45 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
     // A backend can move the player between dimensions without a server switch (a nether portal,
     // a /world command). Record it, or the dimension we hold goes stale and the next switch
     // needlessly refuses to preserve the client's world.
+    // Asked before the dimension is recorded, not after: recording first would overwrite the very
+    // value the question compares against, and every respawn would look like it kept the world --
+    // a nether portal included, which would leave the client in the wrong one.
+    final boolean keepsClientWorld = playerSessionHandler.respawnKeepsClientWorld(packet);
     playerSessionHandler.rememberClientDimension(packet);
+
+    if (keepsClientWorld) {
+      // The respawn puts the player back in the world the client already has. Sending it would
+      // make the client tear that world down and draw a loading screen over the rebuild, which is
+      // the whole of what a player sees on a long teleport. Withholding it leaves the client where
+      // it is, and the server moves the player within it as usual.
+      withholdNextLoadingRequest = true;
+      return true; // Handled, not forwarded
+    }
+
     return false; // Forward
+  }
+
+  @Override
+  public boolean handle(GameEventPacket packet) {
+    if (packet.getEvent() != GameEventPacket.START_WAITING_FOR_LEVEL_CHUNKS) {
+      return false; // Forward
+    }
+    if (!withholdNextLoadingRequest) {
+      if (server.getConfiguration().isHideTeleportLoadingScreen()) {
+        LOGGER.info("[seamless] {}: letting the request to wait for chunks through; the respawn "
+            + "in front of it was not withheld", serverConn.getPlayer().getUsername());
+      }
+      return false; // Forward
+    }
+    withholdNextLoadingRequest = false;
+
+    // The client was never told to rebuild, so there is nothing for it to wait for. What it must
+    // not do is leave the backend waiting: from 1.21.4 the server holds the player still until the
+    // client reports it has loaded, and a client that was never asked never reports.
+    if (ClientPlaySessionHandler.acknowledgesLoading(serverConn.getPlayer().getProtocolVersion())) {
+      serverConn.ensureConnected().write(ServerboundPlayerLoadedPacket.INSTANCE);
+    }
+    return true; // Handled, not forwarded
   }
 
   @Override

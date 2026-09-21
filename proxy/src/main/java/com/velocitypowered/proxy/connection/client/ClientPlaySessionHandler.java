@@ -690,7 +690,9 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
       // the world. The backend waits for that before it accepts movement, so the player would
       // stand still server-side while their client walks away. It is loaded by definition here,
       // so say so on its behalf.
-      serverMc.write(ServerboundPlayerLoadedPacket.INSTANCE);
+      if (acknowledgesLoading(player.getProtocolVersion())) {
+        serverMc.write(ServerboundPlayerLoadedPacket.INSTANCE);
+      }
       destination.setClientLoaded(true);
     } else {
       // Clear tab list to avoid duplicate entries
@@ -779,11 +781,101 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
     clientDimension = dimensionKey(respawn.getDimensionInfo(), respawn.getDimension());
   }
 
-  private static @Nullable String dimensionKey(@Nullable DimensionInfo info, int legacyDimension) {
+  /**
+   * Decides whether a respawn the backend is about to send would leave the client's world exactly
+   * as it is, so that withholding it costs the client nothing and saves it a loading screen.
+   *
+   * <p>Folia moves a player across a region boundary by respawning them, so on Folia this is what
+   * an ordinary long teleport looks like. Both halves have to hold. The world has to be the one
+   * the client already holds, or withholding the packet would leave it in the wrong one. And the
+   * server has to be asking for all player data to be kept: anything less means it wants the
+   * player reset, as after a death, and then the screen is honest.</p>
+   *
+   * @param respawn the respawn packet the backend sent
+   * @return whether the packet can be withheld
+   */
+  public boolean respawnKeepsClientWorld(RespawnPacket respawn) {
+    if (!server.getConfiguration().isHideTeleportLoadingScreen()
+        || player.getProtocolVersion().lessThan(ProtocolVersion.MINECRAFT_1_20_3)) {
+      return false;
+    }
+
+    final String respawnedInto = dimensionKey(respawn.getDimensionInfo(), respawn.getDimension());
+    final boolean sameWorld = clientDimension != null
+        && Objects.equals(respawnedInto, clientDimension);
+    final boolean keepsEverything = respawn.getDataToKeep() == RespawnPacket.KEEP_ALL_DATA;
+
+    // One line per respawn, and only for those who turned this on. A respawn is rare and the two
+    // reasons to decline are impossible to tell apart from the outside, which has cost enough
+    // rounds of guessing already.
+    if (!sameWorld || !keepsEverything) {
+      LOGGER.info("[seamless] {}: forwarding a respawn into {} (the client holds {}), "
+              + "dataToKeep={}; its loading screen stays", player.getUsername(),
+          describe(respawnedInto), describe(clientDimension), respawn.getDataToKeep());
+      return false;
+    }
+
+    LOGGER.info("[seamless] {}: withholding a respawn into {}; the client keeps its world and "
+        + "draws no loading screen", player.getUsername(), describe(respawnedInto));
+    return true;
+  }
+
+  /**
+   * Says whether a client of this version reports back that it has finished loading, and so
+   * whether the proxy has to report it on the client's behalf when it withholds the request to
+   * wait.
+   *
+   * @param version the client's protocol version
+   * @return whether the loaded handshake exists
+   */
+  public static boolean acknowledgesLoading(ProtocolVersion version) {
+    return version.noLessThan(ProtocolVersion.MINECRAFT_1_21_4);
+  }
+
+  /**
+   * Renders a level identity for a human. The key itself joins its parts with null bytes, which
+   * read as nothing at all in a log line.
+   *
+   * @param key a level identity, or null if none has been recorded yet
+   * @return something legible
+   */
+  private static String describe(final @Nullable String key) {
+    if (key == null) {
+      return "(nothing yet)";
+    }
+    final String[] parts = key.split("\u0000");
+    if (parts.length < 3) {
+      return key;
+    }
+    // The type identifier is empty from 1.20.5, where it is sent as the registry id instead.
+    final String type = parts[0].isEmpty() ? "type " + parts[2] : parts[0];
+    return parts[1] + " (" + type + ")";
+  }
+
+  /**
+   * The identity of a client's level, for deciding whether it can be kept.
+   *
+   * <p>Both halves of the dimension are used, and both are load-bearing. From 1.20.5 the dimension
+   * type is no longer sent as a string at all -- it is a registry id, and the identifier here is
+   * left empty -- so on every modern version the level name is the only part that distinguishes
+   * anything. A key built from the identifier alone compares "" against "" and calls every world
+   * the same one, which withholds the respawn for a nether portal and leaves the client reading
+   * 16-section nether chunks as a 384-block overworld.</p>
+   *
+   * <p>Being stricter than the client strictly requires is the safe direction: two worlds of one
+   * dimension type really are interchangeable to a client, and are refused here anyway. The cost
+   * is a loading screen that was not needed; the cost of the other mistake is a broken session.</p>
+   *
+   * @param info            the dimension the packet named, or null before 1.16
+   * @param legacyDimension the numeric dimension used before 1.16
+   * @return a key that is equal only when the client's level need not be rebuilt
+   */
+  static @Nullable String dimensionKey(@Nullable DimensionInfo info, int legacyDimension) {
     if (info == null) {
       return Integer.toString(legacyDimension);
     }
-    return info.getRegistryIdentifier() + "\u0000" + info.getLevelName();
+    return info.getRegistryIdentifier() + "\u0000" + info.getLevelName()
+        + "\u0000" + legacyDimension;
   }
 
   /**
