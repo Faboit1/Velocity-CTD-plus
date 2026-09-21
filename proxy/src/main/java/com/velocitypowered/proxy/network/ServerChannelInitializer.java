@@ -57,12 +57,6 @@ public class ServerChannelInitializer extends ChannelInitializer<Channel> {
 
   @Override
   protected void initChannel(Channel ch) {
-    // Under a connection flood a good number of channels are already gone by the time we get
-    // here; building a pipeline and a session handler for them is pure waste.
-    if (!ch.isActive()) {
-      return;
-    }
-
     ch.pipeline()
         .addLast(LEGACY_PING_DECODER, new LegacyPingDecoder())
         .addLast(FRAME_DECODER, new MinecraftVarintFrameDecoder(ProtocolUtils.Direction.SERVERBOUND))
