@@ -4,5 +4,18 @@ main: com.velocityctd.seamless.SeamlessPlugin
 api-version: '1.21'
 folia-supported: true
 author: Velocity-CTD Contributors
-description: Removes the terrain loading screen on server switches and long teleports.
+description: Removes the terrain loading screen on server switches and long teleports, and tells
+  the server whether each player has a real, offline, or Bedrock account.
 depend: [packetevents]
+# Only for reading; neither is required. Listed so that whichever is installed has finished loading
+# before the first player logs in and is asked about.
+softdepend: [floodgate, Geyser-Spigot]
+commands:
+  accounttype:
+    description: Show how a player got onto the server -- real account, offline, or Bedrock.
+    usage: /<command> [player]
+    permission: velocityseamless.accounttype
+permissions:
+  velocityseamless.accounttype:
+    description: Allows using /accounttype.
+    default: op

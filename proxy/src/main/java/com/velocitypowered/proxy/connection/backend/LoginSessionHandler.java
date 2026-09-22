@@ -73,6 +73,31 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
    */
   private static final byte SEAMLESS_FORMAT_VERSION = 1;
 
+  /**
+   * Login-phase channel a backend plugin uses to ask how the arriving player authenticated. The
+   * backend cannot tell on its own: behind a proxy it always runs in offline mode, so every player
+   * looks the same to it whether or not they own the game.
+   */
+  private static final String ACCOUNT_TYPE_CHANNEL = "velocityctd:accounttype";
+
+  /**
+   * Payload format version for {@link #ACCOUNT_TYPE_CHANNEL}, independent of the seamless one so
+   * either can change without disturbing the other.
+   */
+  private static final byte ACCOUNT_TYPE_FORMAT_VERSION = 1;
+
+  /**
+   * The player did not authenticate with Mojang: either this proxy runs in offline mode, or a
+   * plugin waved them through. A "cracked" account, in the usual phrasing.
+   */
+  private static final byte ACCOUNT_TYPE_OFFLINE = 0;
+
+  /**
+   * The player authenticated with Mojang's session servers, so the account is real and the name
+   * and UUID on it are theirs.
+   */
+  private static final byte ACCOUNT_TYPE_PREMIUM = 1;
+
   private static final Component MODERN_IP_FORWARDING_FAILURE = Component.translatable("velocity.error.modern-forwarding-failed");
 
   private final VelocityServer server;
@@ -125,6 +150,8 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
       informationForwarded = true;
     } else if (packet.getChannel().equals(SEAMLESS_CHANNEL)) {
       mc.write(new LoginPluginResponsePacket(packet.getId(), true, seamlessHandshake()));
+    } else if (packet.getChannel().equals(ACCOUNT_TYPE_CHANNEL)) {
+      mc.write(new LoginPluginResponsePacket(packet.getId(), true, accountTypeHandshake()));
     } else {
       // Don't understand, fire event if we have subscribers
       if (!this.server.getEventManager().hasSubscribers(ServerLoginPluginMessageEvent.class)) {
@@ -271,6 +298,31 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
     final ByteBuf response = Unpooled.buffer(5);
     response.writeByte(SEAMLESS_FORMAT_VERSION);
     ProtocolUtils.writeVarInt(response, entityId);
+    return response;
+  }
+
+  /**
+   * Tells a backend plugin how this player got in: with a real, Mojang-authenticated account, or
+   * without one.
+   *
+   * <p>Only the proxy knows this. A backend behind a proxy runs in offline mode by definition --
+   * it trusts whatever identity is forwarded to it -- so from where it stands a paid account and a
+   * cracked one are indistinguishable. The answer rides the login phase so it is available before
+   * the player joins, which is when anything that acts on it (restricting a rank, a shop, a
+   * cosmetic tied to a real UUID) needs to have already decided.</p>
+   *
+   * <p>Bedrock players are deliberately not reported here. Geyser and Floodgate publish their own
+   * API, and whichever side of the connection Floodgate is installed on can answer that question
+   * accurately; a guess made here from UUID shape would be worse than the real thing.</p>
+   *
+   * @return the response payload: a format byte followed by the account type
+   */
+  private ByteBuf accountTypeHandshake() {
+    final ByteBuf response = Unpooled.buffer(2);
+    response.writeByte(ACCOUNT_TYPE_FORMAT_VERSION);
+    response.writeByte(serverConn.getPlayer().isOnlineMode()
+        ? ACCOUNT_TYPE_PREMIUM
+        : ACCOUNT_TYPE_OFFLINE);
     return response;
   }
 }

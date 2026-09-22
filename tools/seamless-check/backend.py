@@ -1,18 +1,52 @@
-"""Stands in for a backend running VelocitySeamless: asks the proxy on velocityctd:seamless.
+"""Stands in for a backend running VelocitySeamless: asks the proxy what the plugin asks it.
+
+Two login-phase questions, both on their real channels with their real message IDs:
+
+  velocityctd:seamless     -- which entity ID does this client already hold?
+  velocityctd:accounttype  -- did this player authenticate with Mojang?
 
 Usage: python3 backend.py [port]   (default 25599)
 """
 import socket, sys, threading
 from mcproto import Reader, send, string, varint, read_string, read_varint_from
 
-CHANNEL = "velocityctd:seamless"
-MESSAGE_ID = 0x5EA11E55
+SEAMLESS_CHANNEL = "velocityctd:seamless"
+SEAMLESS_MESSAGE_ID = 0x5EA11E55
+
+ACCOUNT_TYPE_CHANNEL = "velocityctd:accounttype"
+ACCOUNT_TYPE_MESSAGE_ID = 0x0ACC7B4E
+
 FORMAT_VERSION = 1
+
+ACCOUNT_TYPES = {0: "OFFLINE", 1: "PREMIUM", 2: "BEDROCK"}
+
+
+def read_seamless(data, log):
+    if len(data) >= 2:
+        entity_id, _ = read_varint_from(data, 1)
+        log(f"VERDICT [{SEAMLESS_CHANNEL}]: ANSWERED, format={data[0]} entityId={entity_id}")
+    else:
+        log(f"VERDICT [{SEAMLESS_CHANNEL}]: answered but payload too short: {data.hex()}")
+
+
+def read_account_type(data, log):
+    if len(data) >= 2:
+        name = ACCOUNT_TYPES.get(data[1], f"unrecognised({data[1]})")
+        log(f"VERDICT [{ACCOUNT_TYPE_CHANNEL}]: ANSWERED, format={data[0]} accountType={name}")
+    else:
+        log(f"VERDICT [{ACCOUNT_TYPE_CHANNEL}]: answered but payload too short: {data.hex()}")
+
+
+QUESTIONS = {
+    SEAMLESS_MESSAGE_ID: (SEAMLESS_CHANNEL, read_seamless),
+    ACCOUNT_TYPE_MESSAGE_ID: (ACCOUNT_TYPE_CHANNEL, read_account_type),
+}
 
 
 def serve(conn, addr):
     log = lambda m: print(f"[backend] {m}", flush=True)
     reader = Reader(conn)
+    outstanding = set(QUESTIONS)
     try:
         pid, payload = reader.read_packet()          # handshake
         protocol, off = read_varint_from(payload, 0)
@@ -23,13 +57,14 @@ def serve(conn, addr):
         name, _ = read_string(payload, 0)
         log(f"login start: name={name!r} (packet id {pid})")
 
-        # What the plugin does at LOGIN_START: ask the proxy for the client's entity ID.
-        body = varint(MESSAGE_ID) + string(CHANNEL) + bytes([FORMAT_VERSION])
-        send(conn, 0x04, body)
-        log(f"sent login plugin request on {CHANNEL} as message {MESSAGE_ID}")
+        # What the plugin does at LOGIN_START: ask everything it needs before the player joins.
+        for message_id, (channel, _) in QUESTIONS.items():
+            body = varint(message_id) + string(channel) + bytes([FORMAT_VERSION])
+            send(conn, 0x04, body)
+            log(f"sent login plugin request on {channel} as message {message_id}")
 
         conn.settimeout(10)
-        while True:
+        while outstanding:
             pid, payload = reader.read_packet()
             if pid != 0x02:
                 log(f"unexpected packet id 0x{pid:02x} ({len(payload)} bytes)")
@@ -39,17 +74,18 @@ def serve(conn, addr):
             data = payload[off + 1:]
             log(f"login plugin RESPONSE: message={message_id} successful={bool(successful)} "
                 f"data={data.hex() or '(none)'}")
-            if message_id == MESSAGE_ID:
-                if not successful:
-                    log("VERDICT: the proxy DECLINED the channel")
-                elif len(data) >= 2:
-                    entity_id, _ = read_varint_from(data, 1)
-                    log(f"VERDICT: the proxy ANSWERED, format={data[0]} entityId={entity_id}")
-                else:
-                    log(f"VERDICT: answered but payload too short: {data.hex()}")
-                return
+            if message_id not in outstanding:
+                continue
+            outstanding.discard(message_id)
+            channel, interpret = QUESTIONS[message_id]
+            if not successful:
+                log(f"VERDICT [{channel}]: the proxy DECLINED the channel")
+            else:
+                interpret(data, log)
     except (EOFError, socket.timeout) as done:
-        log(f"VERDICT: no response -- {type(done).__name__}")
+        for message_id in outstanding:
+            log(f"VERDICT [{QUESTIONS[message_id][0]}]: no response")
+        log(f"finished -- {type(done).__name__}")
     except Exception as failed:                                    # noqa: BLE001
         log(f"error: {failed!r}")
     finally:
