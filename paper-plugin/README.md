@@ -2,7 +2,8 @@
 
 Backend companion plugin for Velocity-CTD+'s seamless switching. It removes the terrain loading
 screen in the two places it is not telling the truth: a server switch that keeps the player's world,
-and a teleport within one.
+and a teleport within one. It also answers a question a backend cannot answer for itself: how each
+arriving player got in — with a real Minecraft account, without one, or from Bedrock Edition.
 
 ## What it does
 
@@ -34,6 +35,48 @@ The cost of the fast path is that the server believes the player finished loadin
 are moved, so chunks stream in without holding them still. That is the point, and on a slow
 connection it means briefly walking over terrain that has not arrived yet.
 
+## Account types
+
+A backend behind a proxy runs in offline mode by definition — it trusts whatever identity the
+proxy forwards — so on its own it cannot tell a paid account from a cracked one. The proxy can, and
+this plugin asks it during login, on `velocityctd:accounttype`. Bedrock players are recognised
+separately, by asking Floodgate or Geyser through their own API.
+
+Other plugins read the result through `AccountTypes`. Add `VelocitySeamless` to your plugin's
+`softdepend` and call it from anywhere:
+
+```java
+import com.velocityctd.seamless.AccountType;
+import com.velocityctd.seamless.AccountTypes;
+
+switch (AccountTypes.of(player)) {
+  case PREMIUM -> // owns the game; their UUID and name are genuinely theirs
+  case OFFLINE -> // cracked account; trust nothing tied to identity
+  case BEDROCK -> // Bedrock Edition through Geyser, confirmed by Floodgate
+  case UNKNOWN -> // nothing authoritative answered; do not assume
+}
+```
+
+There is also `AccountTypes.isPremium(player)` and `AccountTypes.isBedrock(player)`.
+
+Each player's type is settled during `PlayerLoginEvent` at `LOWEST` priority, so it is already
+available to every later login listener, to `PlayerJoinEvent`, and to everything after.
+`/accounttype [player]` reports it for someone online, along with where Bedrock detection is coming
+from.
+
+Two things are worth being careful about:
+
+- **`UNKNOWN` means the question went unanswered, not that the answer was no.** Gate on `PREMIUM`
+  rather than testing for `OFFLINE`, so that a proxy which never replied fails closed.
+- **Bedrock players are neither premium nor cracked.** They authenticate with Xbox, not Mojang, so
+  the proxy quite correctly reports them as offline and Floodgate's answer overrides it. Without
+  Floodgate or Geyser on the backend they stay `OFFLINE`.
+
+No guessing is done from the shape of a UUID. The usual shortcut — calling a UUID Bedrock because
+its top half is zero — is a guess about a Floodgate internal, and it is wrong in both directions:
+it misses a Bedrock player whose account has been linked to a Java one, and it can catch a Java
+player whose UUID was assigned by something else.
+
 ## Requirements
 
 | | |
@@ -41,6 +84,7 @@ connection it means briefly walking over terrain that has not arrived yet.
 | Server | Paper 1.20.5+, Folia, or Canvas |
 | Also install | [packetevents](https://modrinth.com/plugin/packetevents) |
 | Proxy | Velocity-CTD+ with `keep-client-world-on-switch = true` |
+| Optional | [Floodgate](https://geysermc.org) or Geyser, to recognise Bedrock players |
 
 Paper 1.20.5 is the floor because the entity ID is set through the server's own internals, which
 only became reachable by name once Paper moved to Mojang mappings — which is also why this needs no
@@ -59,11 +103,12 @@ handshake was introduced.
    ```
 3. Restart. The plugin logs what it enabled:
    ```
+   [VelocitySeamless] Reporting account types; asking the proxy on velocityctd:accounttype as each player logs in. Bedrock detection: unavailable, no Floodgate or Geyser on this server.
    [VelocitySeamless] Entity ID reuse enabled; asking the proxy on velocityctd:seamless as each player logs in.
    [VelocitySeamless] Removing the terrain loading screen on server switches, and on teleports that keep the player's world.
    ```
 
-Both features can be switched off independently in `config.yml`.
+Every feature can be switched off independently in `config.yml`.
 
 ## When a loading screen still appears
 
@@ -105,7 +150,17 @@ before it withholds anything.
 
 ## Protocol
 
-The plugin sends a login plugin request on `velocityctd:seamless` carrying one byte, its format
-version. The proxy replies with that format byte followed by the client's entity ID as a VarInt,
-where `0` means "join this player normally". `SeamlessPayloadTest` pins that encoding, since a
-mismatch between separately-shipped halves would not throw — it would quietly hand back a wrong ID.
+Two login plugin requests, each carrying one byte — its format version — and each answered by the
+proxy in the same format:
+
+| Channel | Answer |
+|---|---|
+| `velocityctd:seamless` | the format byte, then the client's entity ID as a VarInt, where `0` means "join this player normally" |
+| `velocityctd:accounttype` | the format byte, then the account type: `0` offline, `1` premium, `2` reserved for a proxy that learns to recognise Bedrock itself |
+
+`SeamlessPayloadTest` and `AccountTypePayloadTest` pin those encodings, since a mismatch between
+separately-shipped halves would not throw — it would quietly hand back a wrong entity ID, or a
+confident wrong answer about whether someone owns the game.
+
+`tools/seamless-check/backend.py` in the proxy repository stands in for this plugin and prints what
+a proxy answers on both channels, without needing a Minecraft client.

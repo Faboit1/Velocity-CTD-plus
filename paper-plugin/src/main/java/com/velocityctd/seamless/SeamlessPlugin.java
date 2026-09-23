@@ -18,6 +18,8 @@
 package com.velocityctd.seamless;
 
 import com.github.retrooper.packetevents.PacketEvents;
+import org.bukkit.command.PluginCommand;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -43,6 +45,10 @@ import org.bukkit.plugin.java.JavaPlugin;
  *
  * <p>Each half is independent and switched on separately. Both degrade quietly: if this plugin can
  * do nothing, players still join and teleport normally, they just see the loading screen.</p>
+ *
+ * <p>It also answers a question that has nothing to do with loading screens but needs the same
+ * login-phase channel to the proxy: how each arriving player authenticated. See
+ * {@link AccountTypes}.</p>
  */
 public final class SeamlessPlugin extends JavaPlugin implements Listener {
 
@@ -50,6 +56,8 @@ public final class SeamlessPlugin extends JavaPlugin implements Listener {
   private ProxyEntityIdChannel entityIdChannel;
   private LoadingScreenSuppressor loadingScreenSuppressor;
   private EntityIdApplier entityIdApplier;
+  private AccountTypeChannel accountTypeChannel;
+  private FloodgateLookup floodgateLookup;
 
   @Override
   public void onEnable() {
@@ -58,11 +66,16 @@ public final class SeamlessPlugin extends JavaPlugin implements Listener {
     final boolean reuseEntityId = getConfig().getBoolean("reuse-entity-id-on-switch", true);
     final boolean hideTeleportLoadingScreen =
         getConfig().getBoolean("hide-teleport-loading-screen", false);
+    final boolean reportAccountType = getConfig().getBoolean("report-account-type", true);
     this.debugLogging = getConfig().getBoolean("debug", false);
 
-    if (!reuseEntityId && !hideTeleportLoadingScreen) {
-      getLogger().warning("Both features are disabled in config.yml; this plugin will do nothing.");
+    if (!reuseEntityId && !hideTeleportLoadingScreen && !reportAccountType) {
+      getLogger().warning("Every feature is disabled in config.yml; this plugin will do nothing.");
       return;
+    }
+
+    if (reportAccountType) {
+      enableAccountTypes();
     }
 
     if (reuseEntityId) {
@@ -96,6 +109,72 @@ public final class SeamlessPlugin extends JavaPlugin implements Listener {
   }
 
   /**
+   * Starts asking the proxy how each arriving player authenticated, and works out where Bedrock
+   * players can be recognised from.
+   */
+  private void enableAccountTypes() {
+    floodgateLookup = new FloodgateLookup(getLogger());
+    accountTypeChannel = new AccountTypeChannel(getLogger(), debugLogging ? getLogger() : null);
+    PacketEvents.getAPI().getEventManager().registerListener(accountTypeChannel);
+
+    final PluginCommand command = getCommand("accounttype");
+    if (command != null) {
+      final AccountTypeCommand executor = new AccountTypeCommand(floodgateLookup);
+      command.setExecutor(executor);
+      command.setTabCompleter(executor);
+    }
+
+    getLogger().info("Reporting account types; asking the proxy on "
+        + AccountTypeChannel.channel() + " as each player logs in. Bedrock detection: "
+        + (floodgateLookup.isAvailable()
+            ? "using " + floodgateLookup.source()
+            : "unavailable, no Floodgate or Geyser on this server") + ".");
+  }
+
+  /**
+   * Settles what kind of account a player has, before anything else can ask.
+   *
+   * <p>Floodgate is asked first and wins outright. A Bedrock player does not authenticate with
+   * Mojang -- they have an Xbox account instead -- so the proxy quite correctly reports them as
+   * offline, and taking that at face value would file every Bedrock player alongside cracked
+   * ones.</p>
+   *
+   * @param player the arriving player
+   */
+  private void resolveAccountType(final Player player) {
+    final AccountType fromProxy = accountTypeChannel.take(player.getName());
+    final AccountType resolved = floodgateLookup.isBedrockPlayer(player.getUniqueId())
+        ? AccountType.BEDROCK
+        : fromProxy;
+
+    AccountTypes.record(player.getUniqueId(), resolved);
+
+    if (debugLogging) {
+      getLogger().info("[debug] " + player.getName() + " is " + resolved
+          + explain(resolved, fromProxy));
+    }
+  }
+
+  /**
+   * Adds whatever is worth knowing beyond the answer itself: why there is no answer, or why it
+   * differs from the one the proxy gave.
+   *
+   * @param resolved what the player was recorded as
+   * @param fromProxy what the proxy said, before Floodgate was consulted
+   * @return a trailing clause for the debug line, possibly empty
+   */
+  private static String explain(final AccountType resolved, final AccountType fromProxy) {
+    if (resolved == AccountType.UNKNOWN) {
+      return "; nothing answered " + AccountTypeChannel.channel() + ", so the proxy is not a "
+          + "Velocity-CTD+ with this build";
+    }
+    if (resolved == AccountType.BEDROCK && fromProxy != AccountType.BEDROCK) {
+      return " (Floodgate says so; the proxy reported " + fromProxy + ")";
+    }
+    return "";
+  }
+
+  /**
    * Applies the entity ID the proxy reported, before the server builds this player's join game
    * packet.
    *
@@ -108,6 +187,12 @@ public final class SeamlessPlugin extends JavaPlugin implements Listener {
    */
   @EventHandler(priority = EventPriority.LOWEST)
   public void onPlayerLogin(final PlayerLoginEvent event) {
+    if (accountTypeChannel != null) {
+      // Deliberately first, and at LOWEST: every other login listener, and everything after them,
+      // can then ask AccountTypes about this player and get an answer.
+      resolveAccountType(event.getPlayer());
+    }
+
     if (entityIdChannel == null || entityIdApplier == null) {
       return;
     }
@@ -145,6 +230,10 @@ public final class SeamlessPlugin extends JavaPlugin implements Listener {
     if (entityIdChannel != null) {
       entityIdChannel.forget(event.getPlayer().getName());
     }
+    if (accountTypeChannel != null) {
+      accountTypeChannel.forget(event.getPlayer().getName());
+      AccountTypes.forget(event.getPlayer().getUniqueId());
+    }
     if (loadingScreenSuppressor != null) {
       loadingScreenSuppressor.forget(event.getPlayer().getUniqueId());
     }
@@ -157,6 +246,10 @@ public final class SeamlessPlugin extends JavaPlugin implements Listener {
     }
     if (loadingScreenSuppressor != null) {
       PacketEvents.getAPI().getEventManager().unregisterListener(loadingScreenSuppressor);
+    }
+    if (accountTypeChannel != null) {
+      PacketEvents.getAPI().getEventManager().unregisterListener(accountTypeChannel);
+      AccountTypes.clear();
     }
   }
 }

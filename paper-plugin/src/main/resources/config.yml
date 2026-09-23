@@ -36,6 +36,22 @@ reuse-entity-id-on-switch: true
 # walk over terrain that has not arrived yet.
 hide-teleport-loading-screen: false
 
+# Ask the proxy how each arriving player authenticated, and report it to other plugins through
+# com.velocityctd.seamless.AccountTypes.
+#
+# A backend behind a proxy runs in offline mode by definition -- it trusts the identity forwarded to
+# it -- so on its own it cannot tell a paid account from a cracked one. The proxy can, and is asked
+# during login on the channel velocityctd:accounttype. Requires a Velocity-CTD+ that answers on that
+# channel; behind anything else every player comes out UNKNOWN and nothing breaks.
+#
+# Bedrock players are recognised separately, by asking Floodgate or Geyser through their own API. No
+# guessing is done from the shape of a UUID. If neither is installed on this server, Bedrock players
+# are reported as whatever the proxy said, which is usually OFFLINE -- they authenticate with Xbox
+# rather than Mojang.
+#
+# Use /accounttype [player] to see what this resolved to for someone.
+report-account-type: true
+
 # Log what the plugin decides for every loading request and every arriving player. Turn this on when
 # a loading screen still appears and it is not obvious why: it reports whether the proxy had an
 # entity ID to reuse, and whether each request was suppressed or deliberately allowed through.

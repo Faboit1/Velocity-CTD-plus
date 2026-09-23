@@ -1,7 +1,8 @@
 # seamless-check
 
-Checks that a proxy answers the `velocityctd:seamless` login handshake, and that the entity ID it
-reports on a switch is the one the client actually holds — without a Minecraft client.
+Checks that a proxy answers the login handshakes VelocitySeamless depends on — that the entity ID
+it reports on a switch is the one the client actually holds, and that it reports how the player
+authenticated — without a Minecraft client.
 
 That gap is why the feature shipped broken twice. Both halves of the handshake degrade silently by
 design: a proxy that does not answer and a proxy that answers "nothing to preserve" produce the
@@ -9,7 +10,8 @@ same absence of an entity ID, and the same ordinary join. Nothing throws, so not
 someone reports a loading screen that should not be there.
 
 `backend.py` stands in for a backend running VelocitySeamless: it takes a proxy's login connection,
-asks the same question on the same channel, and prints what came back. `client.py` is just enough
+asks the same two questions on the same channels with the same message IDs, and prints what came
+back. `client.py` is just enough
 of a 1.21.11 client to make the proxy connect to a backend at all — login, configuration, and the
 keep-alives that stop it being timed out.
 
@@ -23,11 +25,16 @@ python3 client.py Faboit
 
 ```
 [backend] sent login plugin request on velocityctd:seamless as message 1587617365
+[backend] sent login plugin request on velocityctd:accounttype as message 181173070
 [backend] login plugin RESPONSE: message=1587617365 successful=True data=0100
-[backend] VERDICT: the proxy ANSWERED, format=1 entityId=0
+[backend] VERDICT [velocityctd:seamless]: ANSWERED, format=1 entityId=0
+[backend] login plugin RESPONSE: message=181173070 successful=True data=0100
+[backend] VERDICT [velocityctd:accounttype]: ANSWERED, format=1 accountType=OFFLINE
 ```
 
-Entity ID 0 is right here: a first join has no previous world to keep.
+Entity ID 0 is right here: a first join has no previous world to keep. `OFFLINE` is right for a
+proxy with `online-mode = false`; an online-mode proxy reports `PREMIUM`. Bedrock is not reported
+here at all — Floodgate answers that on the backend, through its own API.
 
 ## Checking a switch
 
@@ -46,7 +53,7 @@ the player to `lobby2`, which reports what the proxy offered the destination:
 
 ```
 Faboit[...] logged in with entity id 1        # the real backend
-[backend] VERDICT: the proxy ANSWERED, format=1 entityId=1
+[backend] VERDICT [velocityctd:seamless]: ANSWERED, format=1 entityId=1
 ```
 
 Those two numbers matching is the whole mechanism: the destination can now give the player the
