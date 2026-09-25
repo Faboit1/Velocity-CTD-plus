@@ -23,35 +23,30 @@ import static com.velocitypowered.api.network.ProtocolVersion.MINECRAFT_26_1;
 import static com.velocitypowered.api.network.ProtocolVersion.MINECRAFT_26_2;
 import static com.velocitypowered.proxy.protocol.ProtocolUtils.Direction.CLIENTBOUND;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNull;
 
 import com.velocitypowered.api.network.ProtocolVersion;
-import com.velocitypowered.proxy.protocol.packet.GameEventPacket;
 import com.velocitypowered.proxy.protocol.packet.RespawnPacket;
 import org.junit.jupiter.api.Test;
 
 /**
- * Pins the two packets the proxy has to <em>read</em> from a backend to remove the terrain screen
- * on a teleport.
+ * Pins that the proxy can <em>read</em> a respawn packet coming back from a backend.
  *
- * <p>Both are easy to get silently wrong. A packet registered encode-only is still written
- * correctly and still has a handler, but that handler is never called, so the feature does nothing
- * and nothing complains -- which is exactly how the first attempt at this failed. And an id that
- * is right for one version is not right for the next, with no error either way: the wrong packet
- * is simply decoded as this one.</p>
+ * <p>It has to, for {@code keep-client-world-on-switch} to be correct. A backend moves a player
+ * between dimensions without any server switch -- a nether portal, a {@code /world} command -- and
+ * the proxy only learns of it from this packet. Miss it and the dimension the proxy holds is
+ * whatever the last join game said, which means a player who walked into the nether and then
+ * switched servers would be told to keep a world they are no longer in.</p>
+ *
+ * <p>This is easy to get silently wrong in two ways, and it has been wrong both ways before. A
+ * packet registered encode-only is still written correctly and still has a handler, but that
+ * handler is never called, so the feature does nothing and nothing complains. And an id that is
+ * right for one version is not right for the next, with no error either way: the wrong packet is
+ * simply decoded as this one.</p>
  */
-class SeamlessTeleportPacketsTest {
+class RespawnPacketDecodingTest {
 
   private static MinecraftPacket clientboundPlay(ProtocolVersion version, int id) {
     return StateRegistry.PLAY.getProtocolRegistry(CLIENTBOUND, version).createPacket(id);
-  }
-
-  @Test
-  void decodesTheRequestToWaitForChunks() {
-    assertInstanceOf(GameEventPacket.class, clientboundPlay(MINECRAFT_1_20_3, 0x20));
-    assertInstanceOf(GameEventPacket.class, clientboundPlay(MINECRAFT_1_21_9, 0x26));
-    assertInstanceOf(GameEventPacket.class, clientboundPlay(MINECRAFT_26_1, 0x26));
-    assertInstanceOf(GameEventPacket.class, clientboundPlay(MINECRAFT_26_2, 0x26));
   }
 
   @Test
@@ -60,13 +55,5 @@ class SeamlessTeleportPacketsTest {
     assertInstanceOf(RespawnPacket.class, clientboundPlay(MINECRAFT_1_21_9, 0x50));
     assertInstanceOf(RespawnPacket.class, clientboundPlay(MINECRAFT_26_1, 0x52));
     assertInstanceOf(RespawnPacket.class, clientboundPlay(MINECRAFT_26_2, 0x52));
-  }
-
-  @Test
-  void leavesTheGameEventAloneAbove26Point2() {
-    // 26.3 moved ids somewhere between 0x20 and 0x2c and this one's new value is not known, so it
-    // is deliberately unregistered there rather than guessed at. If this starts failing because
-    // the id was added, that is the moment to extend the mapping.
-    assertNull(clientboundPlay(ProtocolVersion.MINECRAFT_26_3, 0x26));
   }
 }

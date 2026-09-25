@@ -15,12 +15,6 @@ reuse-entity-id-on-switch: true
 
 # Remove the "Loading terrain" screen on a teleport that does not really change the player's world.
 #
-# Leave this off behind Velocity-CTD+, which does the same job in the proxy: set
-# "hide-teleport-loading-screen" in velocity.toml instead. The proxy sees the same two packets, so
-# doing it there needs no plugin on each backend, works on any server software, and does not make
-# this plugin listen to PlayerLoginEvent's neighbours. Turn this on only behind a proxy that does
-# not have that option.
-#
 # Two packets put that screen up. The respawn packet draws it -- Folia moves a player across a
 # region boundary by respawning them, so on Folia a long teleport IS a respawn. The "start waiting
 # for level chunks" game event then keeps it up. Both are withheld together, and the plugin answers
@@ -31,10 +25,13 @@ reuse-entity-id-on-switch: true
 # world, and the server asking for all player data to be kept. A different world, or a respawn that
 # resets the player such as after death, is passed through untouched and keeps its screen.
 #
-# Whichever side does it, the server believes the player finished loading as soon as they are
-# moved, so chunks stream in without holding them still: on a slow connection a player may briefly
-# walk over terrain that has not arrived yet.
-hide-teleport-loading-screen: false
+# The cost is that the server believes the player finished loading as soon as they are moved, so
+# chunks stream in without holding them still: on a slow connection a player may briefly walk over
+# terrain that has not arrived yet. Turn this off if you would rather have the screen.
+#
+# Needs 1.21.2 or newer to do anything: that is when the client/server "player loaded" handshake
+# this relies on was introduced.
+hide-teleport-loading-screen: true
 
 # Ask the proxy how each arriving player authenticated, and report it to other plugins through
 # com.velocityctd.seamless.AccountTypes.
