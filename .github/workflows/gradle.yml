@@ -134,9 +134,7 @@ jobs:
           This is the bootstrap jar. It downloads the required dependencies only once, keeping the download small. Use this one.
 
           **Backend plugin — `VelocitySeamless-<version>-<build>-release.jar`**
-          Optional. Install on your Paper/Folia/Canvas backends, alongside [packetevents](https://modrinth.com/plugin/packetevents), to drop the terrain loading screen on **server switches**, and to let your plugins see how each player got in: a real Minecraft account, no account, or Bedrock through Geyser. See `paper-plugin/README.md`.
-
-          The loading screen on **long teleports** does not need this plugin — set `hide-teleport-loading-screen` in `velocity.toml` and the proxy does it for every backend, on any server software.
+          Optional. Install on your Paper/Folia/Canvas backends, alongside [packetevents](https://modrinth.com/plugin/packetevents), to drop the terrain loading screen on **server switches** and on **long teleports** (including Folia region crossings), and to let your plugins see how each player got in: a real Minecraft account, no account, or Bedrock through Geyser. See `paper-plugin/README.md`.
 
           **Fallback — `velocity-ctd-fatjar-<version>-<build>.jar`**
           Only download the fatjar if the bootstrap jar is causing issues for you. If it is, please [open an issue](https://github.com/${{ github.repository }}/issues) describing the problem so we can fix it.

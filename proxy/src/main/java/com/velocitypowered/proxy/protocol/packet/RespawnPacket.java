@@ -30,13 +30,6 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class RespawnPacket implements MinecraftPacket {
 
-  /**
-   * Both data-to-keep bits: keep attributes and keep entity data. What a server sends when it is
-   * moving a player rather than resetting them -- a portal, or a Folia region crossing. A death
-   * respawn keeps neither.
-   */
-  public static final byte KEEP_ALL_DATA = 3;
-
   private int dimension;
 
   private long partialHashedSeed;

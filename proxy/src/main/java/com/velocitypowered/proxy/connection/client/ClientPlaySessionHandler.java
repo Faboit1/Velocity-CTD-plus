@@ -782,45 +782,6 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
   }
 
   /**
-   * Decides whether a respawn the backend is about to send would leave the client's world exactly
-   * as it is, so that withholding it costs the client nothing and saves it a loading screen.
-   *
-   * <p>Folia moves a player across a region boundary by respawning them, so on Folia this is what
-   * an ordinary long teleport looks like. Both halves have to hold. The world has to be the one
-   * the client already holds, or withholding the packet would leave it in the wrong one. And the
-   * server has to be asking for all player data to be kept: anything less means it wants the
-   * player reset, as after a death, and then the screen is honest.</p>
-   *
-   * @param respawn the respawn packet the backend sent
-   * @return whether the packet can be withheld
-   */
-  public boolean respawnKeepsClientWorld(RespawnPacket respawn) {
-    if (!server.getConfiguration().isHideTeleportLoadingScreen()
-        || player.getProtocolVersion().lessThan(ProtocolVersion.MINECRAFT_1_20_3)) {
-      return false;
-    }
-
-    final String respawnedInto = dimensionKey(respawn.getDimensionInfo(), respawn.getDimension());
-    final boolean sameWorld = clientDimension != null
-        && Objects.equals(respawnedInto, clientDimension);
-    final boolean keepsEverything = respawn.getDataToKeep() == RespawnPacket.KEEP_ALL_DATA;
-
-    // One line per respawn, and only for those who turned this on. A respawn is rare and the two
-    // reasons to decline are impossible to tell apart from the outside, which has cost enough
-    // rounds of guessing already.
-    if (!sameWorld || !keepsEverything) {
-      LOGGER.info("[seamless] {}: forwarding a respawn into {} (the client holds {}), "
-              + "dataToKeep={}; its loading screen stays", player.getUsername(),
-          describe(respawnedInto), describe(clientDimension), respawn.getDataToKeep());
-      return false;
-    }
-
-    LOGGER.info("[seamless] {}: withholding a respawn into {}; the client keeps its world and "
-        + "draws no loading screen", player.getUsername(), describe(respawnedInto));
-    return true;
-  }
-
-  /**
    * Says whether a client of this version reports back that it has finished loading, and so
    * whether the proxy has to report it on the client's behalf when it withholds the request to
    * wait.
@@ -830,26 +791,6 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
    */
   public static boolean acknowledgesLoading(ProtocolVersion version) {
     return version.noLessThan(ProtocolVersion.MINECRAFT_1_21_4);
-  }
-
-  /**
-   * Renders a level identity for a human. The key itself joins its parts with null bytes, which
-   * read as nothing at all in a log line.
-   *
-   * @param key a level identity, or null if none has been recorded yet
-   * @return something legible
-   */
-  private static String describe(final @Nullable String key) {
-    if (key == null) {
-      return "(nothing yet)";
-    }
-    final String[] parts = key.split("\u0000");
-    if (parts.length < 3) {
-      return key;
-    }
-    // The type identifier is empty from 1.20.5, where it is sent as the registry id instead.
-    final String type = parts[0].isEmpty() ? "type " + parts[2] : parts[0];
-    return parts[1] + " (" + type + ")";
   }
 
   /**

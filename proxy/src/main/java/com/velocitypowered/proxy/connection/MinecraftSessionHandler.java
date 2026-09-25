@@ -32,7 +32,6 @@ import com.velocitypowered.proxy.protocol.packet.DialogShowPacket;
 import com.velocitypowered.proxy.protocol.packet.DisconnectPacket;
 import com.velocitypowered.proxy.protocol.packet.EncryptionRequestPacket;
 import com.velocitypowered.proxy.protocol.packet.EncryptionResponsePacket;
-import com.velocitypowered.proxy.protocol.packet.GameEventPacket;
 import com.velocitypowered.proxy.protocol.packet.HandshakePacket;
 import com.velocitypowered.proxy.protocol.packet.HeaderAndFooterPacket;
 import com.velocitypowered.proxy.protocol.packet.JoinGamePacket;
@@ -191,10 +190,6 @@ public interface MinecraftSessionHandler {
   }
 
   default boolean handle(RespawnPacket packet) {
-    return false;
-  }
-
-  default boolean handle(GameEventPacket packet) {
     return false;
   }
 
